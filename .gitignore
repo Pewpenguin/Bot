@@ -1,0 +1,51 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.pyz
+*.pyw
+*.egg-info/
+dist/
+build/
+*.egg
+*.whl
+
+# Virtual Environment
+venv/
+env/
+env.bak/
+
+# IDE and Editor Files
+.vscode/
+*.sublime-project
+*.sublime-workspace
+.idea/
+*.pycharm
+
+# OS and Editor Temp Files
+Thumbs.db
+desktop.ini
+.DS_Store
+
+# Configuration and Secrets
+config.py
+secrets.py
+
+# Logs
+*.log
+
+# Miscellaneous
+*.swp
+*.swo
+*.bak
+*.tmp
+*.temp
+*.cache
+*.DS_Store
+
+# Text files
+welcome_channels.txt
+reaction_roles.txt
+1129744852070961202.txt
+goodbye_channels.txt
