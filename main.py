@@ -6,6 +6,7 @@ import asyncio
 import aiohttp
 
 from config import BOT_TOKEN
+from role import Role
 
 intents = discord.Intents.all()
 client = commands.Bot(command_prefix='!', intents=intents, help_command=None)
@@ -64,40 +65,7 @@ async def on_ready():
 
     print("The client is online")
     print("------------------")    
-    
-@client.event
-async def on_raw_reaction_add(payload):
-    for role_id, msg_id, emoji in client.reaction_roles:
-        if msg_id == payload.message_id and emoji == str(payload.emoji.name.encode("utf-8")):
-            guild = client.get_guild(payload.guild_id)
-            member = guild.get_member(payload.user_id)
-            await member.add_roles(guild.get_role(role_id))
-            return
-
-
-@client.event
-async def on_raw_reaction_remove(payload):
-    for role_id, msg_id, emoji in client.reaction_roles:
-        if msg_id == payload.message_id and emoji == str(payload.emoji.name.encode("utf-8")):
-            guild = client.get_guild(payload.guild_id)
-            member = guild.get_member(payload.user_id)
-            await member.remove_roles(guild.get_role(role_id))
-            return
-
-@client.command()
-async def set_reaction(ctx, role: discord.Role = None, msg: discord.Message = None, emoji=None):
-    if role is not None and msg is not None and emoji is not None:
-        await msg.add_reaction(emoji)
-        client.reaction_roles.append((role.id, msg.id, str(emoji.encode("utf-8"))))
-
-        async with aiofiles.open("reaction_roles.txt", mode="a") as file:
-            emoji_utf = emoji.encode("utf-8")
-            await file.write(f"{role.id} {msg.id} {emoji_utf}\n")
-
-        await ctx.send("Reaction has been set.")
-    else:
-        await ctx.send("Invalid arguments.")
-        
+            
 @client.command()
 async def set_welcome_channel(ctx, new_channel: discord.TextChannel = None, *, message=None):
     if new_channel is not None and message is not None:
@@ -275,6 +243,7 @@ async def ban(ctx, member: discord.Member = None, duration: int = None, *, reaso
          
 async def setup():
     await client.wait_until_ready()
+    await client.add_cog(Role(client))
 async def run_bot():
     await client.start(BOT_TOKEN)
     
