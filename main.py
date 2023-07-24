@@ -3,6 +3,7 @@ from discord.ext import commands
 import datetime
 import aiofiles
 import asyncio
+import aiohttp
 
 from config import BOT_TOKEN
 
@@ -62,9 +63,8 @@ async def on_ready():
                     client.warnings[guild.id][member_id] = [1, [(admin_id, reason)]]
 
     print("The client is online")
-    print("------------------")
-
-
+    print("------------------")    
+    
 @client.event
 async def on_raw_reaction_add(payload):
     for role_id, msg_id, emoji in client.reaction_roles:
@@ -97,7 +97,7 @@ async def set_reaction(ctx, role: discord.Role = None, msg: discord.Message = No
         await ctx.send("Reaction has been set.")
     else:
         await ctx.send("Invalid arguments.")
-
+        
 @client.command()
 async def set_welcome_channel(ctx, new_channel: discord.TextChannel = None, *, message=None):
     if new_channel is not None and message is not None:
@@ -134,7 +134,7 @@ async def set_goodbye_channel(ctx, new_channel: discord.TextChannel = None, *, m
 
     else:
         await ctx.channel.send("You didn't include the name of a goodbye channel or a goodbye message.")
-
+        
 @client.event
 async def on_member_join(member):
     for guild_id in client.welcome_channels:
@@ -143,7 +143,7 @@ async def on_member_join(member):
             channel = member.guild.get_channel(channel_id)
             await channel.send(f"{message} {member.mention}")
             return
-
+        
 
 @client.event
 async def on_member_remove(member):
@@ -272,14 +272,14 @@ async def ban(ctx, member: discord.Member = None, duration: int = None, *, reaso
 
     except discord.Forbidden:
         return await ctx.send("I don't have the necessary permissions to ban members.")
-
-        
+         
 async def setup():
     await client.wait_until_ready()
 
 async def run_bot():
-    await client.start(BOT_TOKEN)   
+    await client.start(BOT_TOKEN)
     
+
 async def main():
     await asyncio.gather(run_bot(), setup())
 
