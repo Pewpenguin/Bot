@@ -168,7 +168,6 @@ async def setup():
     await client.add_cog(Role(client))
     await client.add_cog(Greeting(client))
     await client.add_cog(Help(client))
-    
 async def run_bot():
     await client.start(BOT_TOKEN)
     
