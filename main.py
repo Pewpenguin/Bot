@@ -275,15 +275,13 @@ async def ban(ctx, member: discord.Member = None, duration: int = None, *, reaso
          
 async def setup():
     await client.wait_until_ready()
-
 async def run_bot():
     await client.start(BOT_TOKEN)
     
 
 async def main():
     await asyncio.gather(run_bot(), setup())
-
-
+     
 loop = asyncio.get_event_loop()
 try:
     loop.run_until_complete(main())
