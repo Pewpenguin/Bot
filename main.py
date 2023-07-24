@@ -7,6 +7,7 @@ import aiohttp
 
 from config import BOT_TOKEN
 from role import Role
+from greetings import Greeting
 
 intents = discord.Intents.all()
 client = commands.Bot(command_prefix='!', intents=intents, help_command=None)
@@ -66,62 +67,6 @@ async def on_ready():
     print("The client is online")
     print("------------------")    
             
-@client.command()
-async def set_welcome_channel(ctx, new_channel: discord.TextChannel = None, *, message=None):
-    if new_channel is not None and message is not None:
-        for channel in ctx.guild.channels:
-            if channel == new_channel:
-                client.welcome_channels[ctx.guild.id] = (channel.id, message)
-                await ctx.channel.send(f"Welcome channel has been set to: {channel.name} with the message {message}")
-                await channel.send("This is the new welcome channel!")
-
-                async with aiofiles.open("welcome_channels.txt", mode="a") as file:
-                    await file.write(f"{ctx.guild.id} {new_channel.id} {message}\n")
-
-                return
-        await ctx.channel.send("No matching text channel found in the specified category.")
-    else:
-        await ctx.channel.send("You didn't include the name of a welcome channel or a welcome message.")
-
-
-@client.command()
-async def set_goodbye_channel(ctx, new_channel: discord.TextChannel = None, *, message=None):
-    if new_channel is not None and message is not None:
-        for channel in ctx.guild.channels:
-            if channel == new_channel:
-                client.goodbye_channels[ctx.guild.id] = (channel.id, message)
-                await ctx.channel.send(f"Goodbye channel has been set to: {channel.name} with the message {message}")
-                await channel.send("This is the new goodbye channel!")
-
-                async with aiofiles.open("goodbye_channels.txt", mode="a") as file:
-                    await file.write(f"{ctx.guild.id} {new_channel.id} {message}\n")
-
-                return
-
-        await ctx.channel.send("Couldn't find the given channel.")
-
-    else:
-        await ctx.channel.send("You didn't include the name of a goodbye channel or a goodbye message.")
-        
-@client.event
-async def on_member_join(member):
-    for guild_id in client.welcome_channels:
-        if guild_id == member.guild.id:
-            channel_id, message = client.welcome_channels[guild_id]
-            channel = member.guild.get_channel(channel_id)
-            await channel.send(f"{message} {member.mention}")
-            return
-        
-
-@client.event
-async def on_member_remove(member):
-    for guild_id in client.goodbye_channels:
-        if guild_id == member.guild.id:
-            channel_id, message = client.goodbye_channels[guild_id]
-            channel = member.guild.get_channel(channel_id)
-            await channel.send(f"{message} {member.mention}")
-            return
-
 async def get_help_embed():
     em = discord.Embed(title="Help!", description="", color=discord.Color.green())
     em.description += f"**{client.command_prefix}set_reaction <role> <msg> <emoji>** : Sets the reaction role for the given role, message, and emoji.\n"
@@ -244,6 +189,7 @@ async def ban(ctx, member: discord.Member = None, duration: int = None, *, reaso
 async def setup():
     await client.wait_until_ready()
     await client.add_cog(Role(client))
+    await client.add_cog(Greeting(client))
 async def run_bot():
     await client.start(BOT_TOKEN)
     
