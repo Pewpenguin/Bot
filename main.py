@@ -9,6 +9,7 @@ from config import BOT_TOKEN
 from role import Role
 from greetings import Greeting
 from moderation import Moderation
+from polls import Polls
 
 intents = discord.Intents.all()
 client = commands.Bot(command_prefix='!', intents=intents, help_command=None)
@@ -96,6 +97,7 @@ async def setup():
     await client.add_cog(Role(client))
     await client.add_cog(Greeting(client))
     await client.add_cog(Moderation(client))
+    await client.add_cog(Polls(client))
 async def run_bot():
     await client.start(BOT_TOKEN)
     
