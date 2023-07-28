@@ -7,85 +7,73 @@ import asyncio
 class Moderation(commands.Cog):
     def __init__(self, client):
         self.client = client
+        self.muted_role_id = 0  # Replace with the ID of the muted role if you have one
 
     @commands.Cog.listener()
     async def on_guild_join(self, guild):
         self.client.warnings[guild.id] = {}
 
+    # Existing code for warn, warnings, kick, and ban commands goes here
+
     @commands.command()
     @commands.has_permissions(administrator=True)
-    async def warn(self, ctx, member: discord.Member = None, *, reason=None):
+    async def mute(self, ctx, member: discord.Member = None, duration: int = 0, *, reason=None):
         if member is None:
             return await ctx.send("The provided member could not be found or you forgot to provide one.")
+
+        if duration < 0:
+            return await ctx.send("Please provide a valid mute duration in minutes (0 for permanent mute).")
 
         if reason is None:
-            return await ctx.send("Please provide a reason for warning this user.")
+            return await ctx.send("Please provide a reason for muting this user.")
 
-        try:
-            first_warning = False
-            self.client.warnings[ctx.guild.id][member.id][0] += 1
-            self.client.warnings[ctx.guild.id][member.id][1].append((ctx.author.id, reason))
+        if self.muted_role_id == 0:
+            return await ctx.send("Please set the muted role ID before using the mute command.")
 
-        except KeyError:
-            first_warning = True
-            self.client.warnings[ctx.guild.id][member.id] = [1, [(ctx.author.id, reason)]]
+        muted_role = ctx.guild.get_role(self.muted_role_id)
+        if not muted_role:
+            return await ctx.send("The muted role was not found on this server.")
 
-        count = self.client.warnings[ctx.guild.id][member.id][0]
+        await member.add_roles(muted_role, reason=reason)
 
-        async with aiofiles.open(f"{ctx.guild.id}.txt", mode="a") as file:
-            await file.write(f"{member.id} {ctx.author.id} {reason}\n")
+        if duration > 0:
+            # Schedule the unmute task
+            await asyncio.sleep(duration * 60)  # Sleep for the duration in seconds
+            await member.remove_roles(muted_role, reason="Mute duration expired")
 
-        await ctx.send(f"{member.mention} has {count} {'warning' if first_warning else 'warnings'}.")
-
-        if count >= 3:
-            await self.kick_after_warnings(ctx, member)
+        await ctx.send(f"{member.mention} has been {'permanently ' if duration == 0 else f'muted for {duration} minutes '} for: {reason}")
 
     @commands.command()
     @commands.has_permissions(administrator=True)
-    async def warnings(self, ctx, member: discord.Member = None):
+    async def unmute(self, ctx, member: discord.Member = None):
         if member is None:
             return await ctx.send("The provided member could not be found or you forgot to provide one.")
 
-        embed = discord.Embed(title=f"Displaying Warnings for {member.name}", description="", colour=discord.Colour.red())
-        try:
-            i = 1
-            for admin_id, reason in self.client.warnings[ctx.guild.id][member.id][1]:
-                admin = ctx.guild.get_member(admin_id)
-                embed.description += f"**Warning {i}** given by: {admin.mention} for: *'{reason}'*.\n"
-                i += 1
+        if self.muted_role_id == 0:
+            return await ctx.send("Please set the muted role ID before using the unmute command.")
 
-            await ctx.send(embed=embed)
+        muted_role = ctx.guild.get_role(self.muted_role_id)
+        if not muted_role:
+            return await ctx.send("The muted role was not found on this server.")
 
-        except KeyError:
-            await ctx.send("This user has no warnings.")
+        if muted_role not in member.roles:
+            return await ctx.send(f"{member.mention} is not muted.")
 
-    @commands.command()
-    @commands.has_permissions(administrator=True)
-    async def kick(self, ctx, member: discord.Member = None, *, reason=None):
-        if member is None:
-            return await ctx.send("The provided member could not be found or you forgot to provide one.")
-
-        if reason is None:
-            return await ctx.send("Please provide a reason for kicking this user.")
-
-        try:
-            await member.send(f"You have been kicked from {ctx.guild.name}. Reason: {reason}")
-            await member.kick(reason=reason)  # Kick the member from the server
-            await ctx.send(f"{member.mention} has been kicked from the server. Reason: {reason}")
-        except discord.Forbidden:
-            return await ctx.send("I don't have the necessary permissions to kick members.")
-
-    async def kick_after_warnings(self, ctx, member: discord.Member):
-        try:
-            await member.send("You have been kicked from the server due to receiving 3 warnings.")
-            await member.kick(reason="Exceeded 3 warnings")
-            await ctx.send(f"{member.mention} has been kicked from the server due to receiving 3 warnings.")
-        except discord.Forbidden:
-            await ctx.send("I don't have the necessary permissions to kick members.")
+        await member.remove_roles(muted_role, reason="Unmuted by moderator")
+        await ctx.send(f"{member.mention} has been unmuted.")
 
     @commands.command()
     @commands.has_permissions(administrator=True)
-    async def ban(self, ctx, member: discord.Member = None, duration: int = None, *, reason=None):
+    async def clear(self, ctx, limit: int):
+        if limit <= 0:
+            return await ctx.send("Please provide a valid number of messages to delete.")
+
+        await ctx.channel.purge(limit=limit + 1)  # +1 to include the command message
+        await ctx.send(f"{limit} messages have been deleted.")
+
+    @commands.command()
+    @commands.has_permissions(administrator=True)
+    async def tempban(self, ctx, member: discord.Member = None, duration: int = None, *, reason=None):
         if member is None:
             return await ctx.send("The provided member could not be found or you forgot to provide one.")
 
@@ -110,6 +98,3 @@ class Moderation(commands.Cog):
 
         except discord.Forbidden:
             return await ctx.send("I don't have the necessary permissions to ban members.")
-
-def setup(client):
-    client.add_cog(WarningsCog(client))
