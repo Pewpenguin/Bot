@@ -4,12 +4,17 @@ import datetime
 import aiofiles
 import asyncio
 import aiohttp
+import logging
+import os
 
 from config.config import BOT_TOKEN
+from config.logging_config import setup_logging
+from utils.ffmpeg_check import check_ffmpeg, get_ffmpeg_path
 from cogs.role import Role
 from cogs.greetings import Greeting
 from cogs.moderation import Moderation
 from cogs.polls import Polls
+from cogs.music import Music
 
 intents = discord.Intents.all()
 client = commands.Bot(command_prefix='!', intents=intents, help_command=None)
@@ -17,6 +22,23 @@ client = commands.Bot(command_prefix='!', intents=intents, help_command=None)
 
 @client.event
 async def on_ready():
+    # Setup logging
+    root_logger, music_logger = setup_logging()
+    root_logger.info("Bot is starting up")
+    music_logger.info("Music system initializing")
+    
+    # Check FFmpeg installation
+    is_ffmpeg_installed, ffmpeg_info = check_ffmpeg()
+    if is_ffmpeg_installed:
+        music_logger.info(f"FFmpeg is properly installed: {ffmpeg_info}")
+        ffmpeg_path = get_ffmpeg_path()
+        if ffmpeg_path:
+            music_logger.info(f"FFmpeg path: {ffmpeg_path}")
+    else:
+        music_logger.error(f"FFmpeg is not properly installed: {ffmpeg_info}")
+        music_logger.error("Music functionality may not work without FFmpeg!")
+        print("\033[91mWARNING: FFmpeg is not properly installed. Music functionality may not work!\033[0m")
+    
     client.reaction_roles = []
     client.welcome_channels = {}
     client.goodbye_channels = {}
@@ -100,6 +122,7 @@ async def setup():
     await client.add_cog(Greeting(client))
     await client.add_cog(Moderation(client))
     await client.add_cog(Polls(client))
+    await client.add_cog(Music(client))
 async def run_bot():
     await client.start(BOT_TOKEN)
     
