@@ -15,7 +15,7 @@ build/
 venv/
 env/
 env.bak/
-
+.venv/
 # IDE and Editor Files
 .vscode/
 *.sublime-project

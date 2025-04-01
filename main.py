@@ -5,11 +5,11 @@ import aiofiles
 import asyncio
 import aiohttp
 
-from config import BOT_TOKEN
-from role import Role
-from greetings import Greeting
-from moderation import Moderation
-from polls import Polls
+from config.config import BOT_TOKEN
+from cogs.role import Role
+from cogs.greetings import Greeting
+from cogs.moderation import Moderation
+from cogs.polls import Polls
 
 intents = discord.Intents.all()
 client = commands.Bot(command_prefix='!', intents=intents, help_command=None)
@@ -25,23 +25,25 @@ async def on_ready():
     for guild in client.guilds:
         client.warnings[guild.id] = {}
 
-    for file in ["reaction_roles.txt", "welcome_channels.txt", "goodbye_channels.txt"]:
+    # Initialize data files in the data directory
+    data_files = ["data/reaction_roles.txt", "data/welcome_channels.txt", "data/goodbye_channels.txt"]
+    for file in data_files:
         async with aiofiles.open(file, mode="a") as temp:
             pass
 
-    async with aiofiles.open("reaction_roles.txt", mode="r") as file:
+    async with aiofiles.open("data/reaction_roles.txt", mode="r") as file:
         lines = await file.readlines()
         for line in lines:
             data = line.split(" ")
             client.reaction_roles.append((int(data[0]), int(data[1]), data[2].strip("\n")))
 
-    async with aiofiles.open("welcome_channels.txt", mode="r") as file:
+    async with aiofiles.open("data/welcome_channels.txt", mode="r") as file:
         lines = await file.readlines()
         for line in lines:
             data = line.split(" ")
             client.welcome_channels[int(data[0])] = (int(data[1]), " ".join(data[2:]).strip("\n"))
 
-    async with aiofiles.open("goodbye_channels.txt", mode="r") as file:
+    async with aiofiles.open("data/goodbye_channels.txt", mode="r") as file:
         lines = await file.readlines()
         for line in lines:
             data = line.split(" ")
@@ -104,11 +106,9 @@ async def run_bot():
 
 async def main():
     await asyncio.gather(run_bot(), setup())
-     
-loop = asyncio.get_event_loop()
-try:
-    loop.run_until_complete(main())
-except KeyboardInterrupt:
-    loop.run_until_complete(client.close())
-finally:
-    loop.close()
+
+if __name__ == "__main__":
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        asyncio.run(client.close())

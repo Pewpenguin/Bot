@@ -7,13 +7,11 @@ import asyncio
 class Moderation(commands.Cog):
     def __init__(self, client):
         self.client = client
-        self.muted_role_id = 0  # Replace with the ID of the muted role if you have one
+        self.muted_role_id = 0  
 
     @commands.Cog.listener()
     async def on_guild_join(self, guild):
         self.client.warnings[guild.id] = {}
-
-    # Existing code for warn, warnings, kick, and ban commands goes here
 
     @commands.command()
     @commands.has_permissions(administrator=True)
@@ -68,7 +66,7 @@ class Moderation(commands.Cog):
         if limit <= 0:
             return await ctx.send("Please provide a valid number of messages to delete.")
 
-        await ctx.channel.purge(limit=limit + 1)  # +1 to include the command message
+        await ctx.channel.purge(limit=limit + 1)  
         await ctx.send(f"{limit} messages have been deleted.")
 
     @commands.command()
@@ -85,13 +83,11 @@ class Moderation(commands.Cog):
 
         try:
             await member.send(f"You have been banned from {ctx.guild.name} for {duration} minutes. Reason: {reason}")
-            await ctx.guild.ban(member, reason=reason)  # Ban the member from the server
+            await ctx.guild.ban(member, reason=reason)  
 
-            # Calculate the unban time
             unban_time = datetime.datetime.utcnow() + datetime.timedelta(minutes=duration)
 
-            # Schedule the unban task
-            await asyncio.sleep(duration * 60)  # Sleep for the duration in seconds
+            await asyncio.sleep(duration * 60)  
             await ctx.guild.unban(member, reason="Ban duration expired")
 
             await ctx.send(f"{member.mention} has been banned from the server for {duration} minutes. Reason: {reason}")
