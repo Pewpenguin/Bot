@@ -59,17 +59,54 @@ class Role(commands.Cog):
 
     @commands.command()
     async def create_role(self, ctx, role_name, color=None):
+        # Dictionary of common color names mapped to their hex values
+        color_names = {
+            "red": 0xFF0000,
+            "green": 0x00FF00,
+            "blue": 0x0000FF,
+            "yellow": 0xFFFF00,
+            "purple": 0x800080,
+            "orange": 0xFFA500,
+            "black": 0x000000,
+            "white": 0xFFFFFF,
+            "pink": 0xFFC0CB,
+            "cyan": 0x00FFFF,
+            "gold": 0xFFD700,
+            "silver": 0xC0C0C0,
+            "teal": 0x008080,
+            "brown": 0x8B4513,
+            "gray": 0x808080
+        }
+        
+        role_color = discord.Color.default()
+        
         if color is not None:
-            try:
-                color = discord.Color(int(color, 16))
-            except ValueError:
-                color = discord.Color.default()
+            color = color.lower()
+            # Check if it's a named color
+            if color in color_names:
+                role_color = discord.Color(color_names[color])
+            # Check if it's a hex color code (with or without #)
+            elif color.startswith('#') and len(color) == 7:
+                try:
+                    role_color = discord.Color(int(color[1:], 16))
+                except ValueError:
+                    await ctx.send(f"Invalid hex color format. Using default color instead.")
+            elif len(color) == 6:
+                try:
+                    role_color = discord.Color(int(color, 16))
+                except ValueError:
+                    await ctx.send(f"Invalid hex color format. Using default color instead.")
+            else:
+                await ctx.send(f"Unknown color '{color}'. Using default color instead.")
+                await ctx.send("Available colors: " + ", ".join(color_names.keys()) + " or use hex code like #FF0000")
 
         try:
-            role = await ctx.guild.create_role(name=role_name, color=color)
-            await ctx.send(f"Role '{role.name}' has been created.")
+            role = await ctx.guild.create_role(name=role_name, color=role_color)
+            await ctx.send(f"Role '{role.name}' has been created with the specified color.")
         except discord.Forbidden:
             await ctx.send("I don't have the necessary permissions to create roles.")
+        except Exception as e:
+            await ctx.send(f"An error occurred: {str(e)}")
 
     @commands.command()
     async def delete_role(self, ctx, role: discord.Role = None):
