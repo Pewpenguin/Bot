@@ -15,9 +15,10 @@ from cogs.greetings import Greeting
 from cogs.moderation import Moderation
 from cogs.polls import Polls
 from cogs.music import Music
+from cogs.help import Help
 
 intents = discord.Intents.all()
-client = commands.Bot(command_prefix='!', intents=intents, help_command=None)
+client = commands.Bot(command_prefix='!', intents=intents)
 
 
 @client.event
@@ -93,28 +94,9 @@ async def on_ready():
     print("The client is online")
     print("------------------")    
             
-async def get_help_embed():
-    em = discord.Embed(title="Help!", description="", color=discord.Color.green())
-    em.description += f"**{client.command_prefix}set_reaction <role> <msg> <emoji>** : Sets the reaction role for the given role, message, and emoji.\n"
-    em.description += f"**{client.command_prefix}set_welcome_channel <new-channel> <welcome-message>** : Sets the guild's welcome channel to the given channel and the welcome message to the given message.\n"
-    avatar_url = client.user.avatar.url if client.user.avatar else None
-    em.set_footer(text="Thanks for using me!", icon_url=avatar_url)
-    return em
-
-
 @client.event
 async def on_message(message):
-    if client.user.mentioned_in(message):
-        em = await get_help_embed()
-        await message.channel.send(embed=em)
-
     await client.process_commands(message)
-
-
-@client.command()
-async def help(ctx):
-    em = await get_help_embed()
-    await ctx.send(embed=em)
          
 async def setup():
     await client.wait_until_ready()
@@ -123,6 +105,7 @@ async def setup():
     await client.add_cog(Moderation(client))
     await client.add_cog(Polls(client))
     await client.add_cog(Music(client))
+    await client.add_cog(Help(client))
 async def run_bot():
     await client.start(BOT_TOKEN)
     

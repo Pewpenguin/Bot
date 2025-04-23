@@ -48,7 +48,25 @@ class Greeting(commands.Cog):
     @commands.command()
     @commands.has_permissions(manage_guild=True)
     async def set_welcome_channel(self, ctx, new_channel: discord.TextChannel = None, *, message=None):
-        """Set the welcome channel and message for the server"""
+        """Set the welcome channel and message for the server.
+        
+        Configures a channel where welcome messages will be sent when new members join.
+        You can include placeholders in your message that will be replaced with actual values.
+        
+        Usage:
+        !set_welcome_channel #channel Your welcome message here
+        
+        Example:
+        !set_welcome_channel #welcome Welcome {user} to {server}! You are member #{membercount}.
+        
+        Placeholders:
+        {user} - Mentions the new member
+        {username} - The member's name without mention
+        {server} - The server name
+        {membercount} - Current member count
+        {date} - Current date
+        {time} - Current time
+        """
         if new_channel is None or message is None:
             await ctx.send("Usage: !set_welcome_channel #channel Your welcome message here\n\n"
                           "Available placeholders: {user}, {username}, {server}, {membercount}, {date}, {time}")
@@ -64,7 +82,25 @@ class Greeting(commands.Cog):
     @commands.command()
     @commands.has_permissions(manage_guild=True)
     async def set_goodbye_channel(self, ctx, new_channel: discord.TextChannel = None, *, message=None):
-        """Set the goodbye channel and message for the server"""
+        """Set the goodbye channel and message for the server.
+        
+        Configures a channel where goodbye messages will be sent when members leave.
+        You can include placeholders in your message that will be replaced with actual values.
+        
+        Usage:
+        !set_goodbye_channel #channel Your goodbye message here
+        
+        Example:
+        !set_goodbye_channel #goodbye Goodbye {username}! We'll miss you.
+        
+        Placeholders:
+        {user} - Mentions the member
+        {username} - The member's name without mention
+        {server} - The server name
+        {membercount} - Current member count
+        {date} - Current date
+        {time} - Current time
+        """
         if new_channel is None or message is None:
             await ctx.send("Usage: !set_goodbye_channel #channel Your goodbye message here\n\n"
                           "Available placeholders: {user}, {username}, {server}, {membercount}, {date}, {time}")
@@ -79,7 +115,17 @@ class Greeting(commands.Cog):
 
     @commands.command()
     async def preview_welcome(self, ctx):
-        """Preview the welcome message for this server"""
+        """Preview the welcome message for this server.
+        
+        Shows how the welcome message will appear when a new member joins.
+        This is useful for testing your welcome message configuration.
+        
+        Usage:
+        !preview_welcome
+        
+        The bot will display the welcome message as if you were a new member,
+        including any configured embed formatting if enabled.
+        """
         message = self.get_welcome_message(ctx.guild.id)
         if message is not None:
             formatted_message = self.format_welcome_message(message, ctx.author)
@@ -101,7 +147,17 @@ class Greeting(commands.Cog):
 
     @commands.command()
     async def preview_goodbye(self, ctx):
-        """Preview the goodbye message for this server"""
+        """Preview the goodbye message for this server.
+        
+        Shows how the goodbye message will appear when a member leaves.
+        This is useful for testing your goodbye message configuration.
+        
+        Usage:
+        !preview_goodbye
+        
+        The bot will display the goodbye message as if you were leaving,
+        using your current username and server information.
+        """
         message = self.get_goodbye_message(ctx.guild.id)
         if message is not None:
             formatted_message = self.format_welcome_message(message, ctx.author)
@@ -112,7 +168,19 @@ class Greeting(commands.Cog):
     @commands.command()
     @commands.has_permissions(manage_guild=True)
     async def toggle_welcome_embed(self, ctx, enabled: bool = None):
-        """Toggle whether welcome messages should use embeds"""
+        """Toggle whether welcome messages should use embeds.
+        
+        Enables or disables the use of rich embeds for welcome messages.
+        Embeds provide a more visually appealing welcome with the user's avatar.
+        
+        Usage:
+        !toggle_welcome_embed [True/False]
+        
+        Examples:
+        !toggle_welcome_embed True - Enable welcome embeds
+        !toggle_welcome_embed False - Disable welcome embeds
+        !toggle_welcome_embed - Check current status
+        """
         if enabled is None:
             current = self.welcome_embeds.get(ctx.guild.id, False)
             await ctx.send(f"Welcome embeds are currently {'enabled' if current else 'disabled'}.\n"
@@ -129,7 +197,21 @@ class Greeting(commands.Cog):
     @commands.command()
     @commands.has_permissions(manage_guild=True)
     async def set_join_dm(self, ctx, enabled: bool = None, *, message=None):
-        """Set whether to send a DM to new members and what message to send"""
+        """Set whether to send a DM to new members and what message to send.
+        
+        Configures automatic direct messages sent to new members when they join.
+        This can be used for welcome information, server rules, or getting started guides.
+        
+        Usage:
+        !set_join_dm [True/False] [message]
+        
+        Examples:
+        !set_join_dm True Welcome to our server! Check out #rules to get started.
+        !set_join_dm False - Disable join DMs
+        !set_join_dm - Check current status
+        
+        The same placeholders as welcome messages can be used: {user}, {username}, {server}, etc.
+        """
         if enabled is None:
             current = self.join_dm_enabled.get(ctx.guild.id, False)
             await ctx.send(f"Join DMs are currently {'enabled' if current else 'disabled'}.\n"

@@ -265,12 +265,21 @@ class Music(commands.Cog):
 
     @commands.command(name='join', aliases=['connect'])
     async def connect_(self, ctx, *, channel: discord.VoiceChannel=None):
-        """Connect to voice.
-        Parameters
-        ------------
-        channel: discord.VoiceChannel [Optional]
-            The channel to connect to. If a channel is not specified, an attempt to join the voice channel you are in
-            will be made.
+        """Connect to a voice channel.
+        
+        Makes the bot join a voice channel to play music.
+        If no channel is specified, the bot will join your current voice channel.
+        
+        Usage:
+        !join
+        !join <channel>
+        
+        Parameters:
+        - channel: The voice channel to join (optional)
+        
+        Examples:
+        !join
+        !join General Voice
         """
         logger.info(f"Connect command invoked by {ctx.author}")
         if not channel:
@@ -318,13 +327,21 @@ class Music(commands.Cog):
 
     @commands.command(name='play', aliases=['p'])
     async def play_(self, ctx, *, search: str):
-        """Request a song and add it to the queue.
-        This command attempts to join a valid voice channel if the bot is not already in one.
-        Uses YTDL to automatically search and retrieve a song.
-        Parameters
-        ------------
-        search: str [Required]
-            The song to search and retrieve using YTDL. This could be a simple search, an ID or URL.
+        """Play a song or add it to the queue.
+        
+        Searches for and plays the requested song from YouTube.
+        If a song is already playing, the requested song will be added to the queue.
+        The bot will automatically join your voice channel if it isn't already connected.
+        
+        Usage:
+        !play <search terms or URL>
+        
+        Parameters:
+        - search: The song to play (YouTube URL or search terms)
+        
+        Examples:
+        !play https://www.youtube.com/watch?v=dQw4w9WgXcQ
+        !play never gonna give you up
         """
         logger.info(f"Play command invoked by {ctx.author} with search: {search}")
         async with ctx.channel.typing():
@@ -359,7 +376,13 @@ class Music(commands.Cog):
 
     @commands.command(name='pause')
     async def pause_(self, ctx):
-        """Pause the currently playing song."""
+        """Pause the currently playing song.
+        
+        Temporarily stops the audio playback. Use !resume to continue playing.
+        
+        Usage:
+        !pause
+        """
         vc = ctx.voice_client
         
         if not vc or not vc.is_playing():
@@ -372,7 +395,13 @@ class Music(commands.Cog):
 
     @commands.command(name='resume')
     async def resume_(self, ctx):
-        """Resume the currently paused song."""
+        """Resume the currently paused song.
+        
+        Continues playing a paused song from where it was stopped.
+        
+        Usage:
+        !resume
+        """
         vc = ctx.voice_client
         
         if not vc or not vc.is_connected():
@@ -385,7 +414,14 @@ class Music(commands.Cog):
 
     @commands.command(name='skip')
     async def skip_(self, ctx):
-        """Skip the song."""
+        """Skip the currently playing song.
+        
+        Skips the current song and moves to the next song in the queue.
+        If there are no more songs in the queue, the bot will stop playing.
+        
+        Usage:
+        !skip
+        """
         vc = ctx.voice_client
         
         if not vc or not vc.is_connected():
@@ -401,7 +437,17 @@ class Music(commands.Cog):
 
     @commands.command(name='queue', aliases=['q', 'playlist'])
     async def queue_info(self, ctx):
-        """Retrieve a basic queue of upcoming songs."""
+        """Display the current music queue.
+        
+        Shows a list of all songs currently in the queue with their titles and requesters.
+        Displays the currently playing song at the top of the list.
+        
+        Usage:
+        !queue
+        
+        Aliases:
+        !q, !playlist
+        """
         vc = ctx.voice_client
         
         if not vc or not vc.is_connected():
@@ -421,7 +467,17 @@ class Music(commands.Cog):
 
     @commands.command(name='now_playing', aliases=['np', 'current', 'currentsong', 'playing'])
     async def now_playing_(self, ctx):
-        """Display information about the currently playing song."""
+        """Display information about the currently playing song.
+        
+        Shows details about the current song including title, duration, requester, and more.
+        
+        Usage:
+        !now_playing
+        !np (alias)
+        !current (alias)
+        !currentsong (alias)
+        !playing (alias)
+        """
         vc = ctx.voice_client
         
         if not vc or not vc.is_connected():
@@ -441,12 +497,24 @@ class Music(commands.Cog):
         await ctx.send(embed=embed)
 
     @commands.command(name='volume', aliases=['vol'])
-    async def change_volume(self, ctx, *, volume: float):
-        """Change the player volume.
-        Parameters
-        ------------
-        volume: float or int [Required]
-            The volume to set the player to in percentage. This must be between 1 and 100.
+    async def change_volume(self, ctx, *, vol: float=None):
+        """Change or display the music volume.
+        
+        Adjusts the volume of the currently playing music.
+        If no volume is specified, displays the current volume level.
+        
+        Usage:
+        !volume [level]
+        
+        Parameters:
+        - level: Volume level between 0 and 100 (optional)
+        
+        Examples:
+        !volume 50 - Set volume to 50%
+        !volume - Display current volume
+        
+        Aliases:
+        !vol
         """
         vc = ctx.voice_client
         

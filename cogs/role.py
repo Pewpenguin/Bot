@@ -58,6 +58,22 @@ class Role(commands.Cog):
 
     @commands.command()
     async def set_reaction(self, ctx, role: discord.Role = None, msg: discord.Message = None, emoji=None):
+        """Create a reaction role for a message.
+        
+        Sets up a reaction role system where users can click on a reaction to get a role.
+        The bot will add the specified emoji to the message and assign the role when users react.
+        
+        Usage:
+        !set_reaction @role message_id emoji
+        
+        Parameters:
+        - role: The role to assign (mention or ID)
+        - msg: The message to add reactions to (message ID or link)
+        - emoji: The emoji to use for the reaction
+        
+        Example:
+        !set_reaction @Member 123456789012345678 👍
+        """
         if role is None:
             await ctx.send("❌ Error: Please provide a valid role.")
             return
@@ -98,6 +114,21 @@ class Role(commands.Cog):
 
     @commands.command()
     async def assign_role(self, ctx, role: discord.Role = None, member: discord.Member = None):
+        """Manually assign a role to a member.
+        
+        Gives a specified role to a member in the server.
+        Requires appropriate permissions to manage roles.
+        
+        Usage:
+        !assign_role @role @member
+        
+        Parameters:
+        - role: The role to assign (mention or ID)
+        - member: The member to receive the role (mention or ID)
+        
+        Example:
+        !assign_role @Moderator @User
+        """
         if role is None:
             await ctx.send("❌ Error: Please provide a valid role.")
             return

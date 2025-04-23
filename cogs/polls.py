@@ -62,6 +62,17 @@ class Polls(commands.Cog):
 
     @commands.command()
     async def closepoll(self, ctx, poll_msg_link=None):
+        """Close a poll and display the results.
+        
+        Ends an active poll and shows the final vote counts for each option.
+        You need to provide the poll message link or ID.
+        
+        Usage:
+        !closepoll <poll_message_link>
+        
+        Example:
+        !closepoll https://discord.com/channels/123456789012345678/123456789012345678/123456789012345678
+        """
         # Check if poll message link is provided
         if poll_msg_link is None:
             await ctx.send("❌ Error: Please provide a link to the poll message.\nUsage: `!closepoll <poll_message_link>`")
@@ -117,6 +128,17 @@ class Polls(commands.Cog):
 
     @commands.command()
     async def results(self, ctx, poll_msg_link=None):
+        """View the results of a poll.
+        
+        Shows the current vote counts for each option in a poll.
+        You need to provide the poll message link or ID.
+        
+        Usage:
+        !results <poll_message_link>
+        
+        Example:
+        !results https://discord.com/channels/123456789012345678/123456789012345678/123456789012345678
+        """
         # Check if poll message link is provided
         if poll_msg_link is None:
             await ctx.send("❌ Error: Please provide a link to the poll message.\nUsage: `!results <poll_message_link>`")

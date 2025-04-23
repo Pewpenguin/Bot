@@ -16,6 +16,23 @@ class Moderation(commands.Cog):
     @commands.command()
     @commands.has_permissions(administrator=True)
     async def mute(self, ctx, member: discord.Member = None, duration: int = 0, *, reason=None):
+        """Mute a member in the server.
+        
+        Applies the muted role to a member, preventing them from sending messages.
+        You can specify a duration in minutes or mute permanently (duration = 0).
+        
+        Usage:
+        !mute @member [duration] [reason]
+        
+        Parameters:
+        - member: The member to mute (mention or ID)
+        - duration: Time in minutes (0 for permanent mute)
+        - reason: Reason for the mute
+        
+        Example:
+        !mute @User 30 Spamming in chat
+        !mute @User 0 Repeated rule violations
+        """
         if member is None:
             return await ctx.send("The provided member could not be found or you forgot to provide one.")
 
@@ -44,6 +61,19 @@ class Moderation(commands.Cog):
     @commands.command()
     @commands.has_permissions(administrator=True)
     async def unmute(self, ctx, member: discord.Member = None):
+        """Unmute a previously muted member.
+        
+        Removes the muted role from a member, allowing them to send messages again.
+        
+        Usage:
+        !unmute @member
+        
+        Parameters:
+        - member: The member to unmute (mention or ID)
+        
+        Example:
+        !unmute @User
+        """
         if member is None:
             return await ctx.send("The provided member could not be found or you forgot to provide one.")
 
@@ -63,6 +93,20 @@ class Moderation(commands.Cog):
     @commands.command()
     @commands.has_permissions(administrator=True)
     async def clear(self, ctx, limit: int):
+        """Clear a specified number of messages from the channel.
+        
+        Bulk deletes recent messages from the current channel.
+        Discord limits this to messages newer than 14 days old.
+        
+        Usage:
+        !clear [number]
+        
+        Parameters:
+        - number: The number of messages to delete (1-100)
+        
+        Example:
+        !clear 50
+        """
         if limit <= 0:
             return await ctx.send("Please provide a valid number of messages to delete.")
 
@@ -72,6 +116,22 @@ class Moderation(commands.Cog):
     @commands.command()
     @commands.has_permissions(administrator=True)
     async def tempban(self, ctx, member: discord.Member = None, duration: int = None, *, reason=None):
+        """Temporarily ban a member from the server.
+        
+        Bans a member for a specified duration in minutes, then automatically unbans them.
+        The member will receive a DM with the ban reason if possible.
+        
+        Usage:
+        !tempban @member [duration] [reason]
+        
+        Parameters:
+        - member: The member to ban (mention or ID)
+        - duration: Time in minutes before automatic unban
+        - reason: Reason for the ban
+        
+        Example:
+        !tempban @User 1440 Repeated rule violations (24 hour ban)
+        """
         if member is None:
             return await ctx.send("The provided member could not be found or you forgot to provide one.")
 
