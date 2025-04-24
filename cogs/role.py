@@ -159,6 +159,21 @@ class Role(commands.Cog):
 
     @commands.command()
     async def unassign_role(self, ctx, role: discord.Role = None, member: discord.Member = None):
+        """Manually remove a role from a member.
+        
+        Removes a specified role from a member in the server.
+        Requires appropriate permissions to manage roles.
+        
+        Usage:
+        !unassign_role @role @member
+        
+        Parameters:
+        - role: The role to remove (mention or ID)
+        - member: The member to remove the role from (mention or ID)
+        
+        Example:
+        !unassign_role @Moderator @User
+        """
         if role is None:
             await ctx.send("❌ Error: Please provide a valid role.")
             return
