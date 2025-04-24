@@ -1,12 +1,148 @@
 import discord
 from discord.ext import commands
 import re
+import json
+import asyncio
+from utils.database import db
 
 class Polls(commands.Cog):
     def __init__(self, client):
         self.client = client
         self.polls = {}  # A dictionary to store active polls
+        
+        # Load data from database when cog is initialized
+        self.client.loop.create_task(self.load_data())
+        
+        # Set up task to periodically clean up old polls from memory
+        self.client.loop.create_task(self.cleanup_old_polls())
 
+    async def extract_poll_id(self, poll_msg_link):
+        """Extract poll message ID from a message link or ID string"""
+        try:
+            if poll_msg_link.isdigit():
+                return int(poll_msg_link)
+            else:
+                # Extract message ID from Discord message link
+                match = re.search(r'/channels/\d+/\d+/(\d+)', poll_msg_link)
+                if match:
+                    return int(match.group(1))
+                else:
+                    return int(poll_msg_link.split('/')[-1])
+        except (ValueError, IndexError, AttributeError):
+            return None
+    
+    async def cleanup_old_polls(self):
+        """Periodically clean up old closed polls from memory to prevent memory leaks"""
+        await self.client.wait_until_ready()
+        while not self.client.is_closed():
+            try:
+                # Find closed polls that are older than 24 hours
+                polls_to_remove = []
+                for poll_id, poll_data in self.polls.items():
+                    if poll_data['closed']:
+                        polls_to_remove.append(poll_id)
+                
+                # Remove them from memory (they're still in the database)
+                for poll_id in polls_to_remove:
+                    self.polls.pop(poll_id, None)
+                    
+                # Wait for 1 hour before checking again
+                await asyncio.sleep(3600)
+            except Exception as e:
+                print(f"Error cleaning up old polls: {str(e)}")
+                await asyncio.sleep(3600)  # Wait and try again
+    
+    async def load_data(self):
+        """Load poll data from MongoDB"""
+        try:
+            # Wait until bot is ready and database is connected
+            await self.client.wait_until_ready()
+            if not db.connected:
+                print("Database not connected. Polls cog will use default empty settings.")
+                return
+                
+            # Load active polls
+            try:
+                polls_data = await db.find_many("polls", {"closed": False})
+                for data in polls_data:
+                    poll_id = data.get("message_id")
+                    if poll_id:
+                        # Convert string keys in voters dict back to integers
+                        voters = data.get("voters", {})
+                        if isinstance(voters, dict):
+                            voters = {int(k): v for k, v in voters.items()}
+                        
+                        self.polls[poll_id] = {
+                            'question': data.get("question"),
+                            'options': data.get("options"),
+                            'votes': data.get("votes", {}),
+                            'voters': voters,
+                            'closed': data.get("closed", False),
+                            'author_id': data.get("author_id"),
+                            'channel_id': data.get("channel_id"),
+                            'message_id': poll_id
+                        }
+            except Exception as e:
+                print(f"Error loading polls: {str(e)}")
+                
+            # Cache active polls in Redis
+            try:
+                for poll_id, poll_data in self.polls.items():
+                    key = f"poll:{poll_id}"
+                    # Convert voters dict keys to strings for JSON serialization
+                    serializable_data = poll_data.copy()
+                    serializable_data['voters'] = {str(k): v for k, v in poll_data['voters'].items()}
+                    value = json.dumps(serializable_data)
+                    await db.redis_set(key, value, ex=3600)  # Cache for 1 hour
+            except Exception as e:
+                print(f"Error caching polls in Redis: {str(e)}")
+                
+        except Exception as e:
+            print(f"Error loading poll data: {str(e)}")
+            print("Polls cog will use default empty settings.")
+    
+    async def get_poll_from_cache(self, poll_id):
+        """Try to get poll data from Redis cache first"""
+        try:
+            key = f"poll:{poll_id}"
+            cached_data = await db.redis_get(key)
+            if cached_data:
+                data = json.loads(cached_data)
+                # Convert string keys in voters dict back to integers
+                if 'voters' in data and isinstance(data['voters'], dict):
+                    data['voters'] = {int(k): v for k, v in data['voters'].items()}
+                return data
+            return None
+        except Exception:
+            return None
+            
+    async def save_poll_to_db(self, poll_id):
+        """Save poll data to MongoDB and Redis"""
+        if poll_id not in self.polls:
+            return
+            
+        poll_data = self.polls[poll_id]
+        
+        try:
+            # Save to MongoDB
+            # Convert voters dict keys to strings for MongoDB storage
+            serializable_data = poll_data.copy()
+            serializable_data['voters'] = {str(k): v for k, v in poll_data['voters'].items()}
+            
+            await db.update_one(
+                "polls",
+                {"message_id": poll_id},
+                {"$set": serializable_data},
+                upsert=True
+            )
+            
+            # Cache in Redis
+            key = f"poll:{poll_id}"
+            value = json.dumps(serializable_data)
+            await db.redis_set(key, value, ex=3600)  # Cache for 1 hour
+        except Exception as e:
+            print(f"Error saving poll data: {str(e)}")
+    
     @commands.command()
     async def poll(self, ctx, question=None, *options: str):
         # Check if question is provided
@@ -55,6 +191,9 @@ class Polls(commands.Cog):
                 'message_id': poll_msg.id
             }
             
+            # Save to database
+            await self.save_poll_to_db(poll_msg.id)
+            
             await ctx.message.add_reaction('✅')  # Confirm poll creation
         except Exception as e:
             await ctx.send(f"❌ Error creating poll: {str(e)}")
@@ -79,24 +218,38 @@ class Polls(commands.Cog):
             return
             
         # Extract message ID from link
-        try:
-            if poll_msg_link.isdigit():
-                poll_msg_id = int(poll_msg_link)
-            else:
-                # Extract message ID from Discord message link
-                match = re.search(r'/channels/\d+/\d+/(\d+)', poll_msg_link)
-                if match:
-                    poll_msg_id = int(match.group(1))
-                else:
-                    poll_msg_id = int(poll_msg_link.split('/')[-1])
-        except (ValueError, IndexError):
+        poll_msg_id = await self.extract_poll_id(poll_msg_link)
+        if poll_msg_id is None:
             await ctx.send("❌ Error: Invalid poll message link. Please provide a valid Discord message link or ID.")
             return
 
-        # Check if poll exists
+        # Check if poll exists in memory, if not try to get from cache/database
         if poll_msg_id not in self.polls:
-            await ctx.send("❌ Error: That message is not a valid poll.")
-            return
+            cached_poll = await self.get_poll_from_cache(poll_msg_id)
+            if cached_poll:
+                self.polls[poll_msg_id] = cached_poll
+            else:
+                # Try to get from database directly
+                db_poll = await db.find_one("polls", {"message_id": poll_msg_id})
+                if db_poll:
+                    # Convert string keys in voters dict back to integers
+                    voters = db_poll.get("voters", {})
+                    if isinstance(voters, dict):
+                        voters = {int(k): v for k, v in voters.items()}
+                    
+                    self.polls[poll_msg_id] = {
+                        'question': db_poll.get("question"),
+                        'options': db_poll.get("options"),
+                        'votes': db_poll.get("votes", {}),
+                        'voters': voters,
+                        'closed': db_poll.get("closed", False),
+                        'author_id': db_poll.get("author_id"),
+                        'channel_id': db_poll.get("channel_id"),
+                        'message_id': poll_msg_id
+                    }
+                else:
+                    await ctx.send("❌ Error: That message is not a valid poll.")
+                    return
 
         # Check if poll is already closed
         if self.polls[poll_msg_id]['closed']:
@@ -123,6 +276,9 @@ class Polls(commands.Cog):
                     await message.edit(embed=embed)
         except Exception as e:
             print(f"Error updating poll message: {e}")
+        
+        # Save updated poll data to database
+        await self.save_poll_to_db(poll_msg_id)
             
         await ctx.send("✅ The poll is now closed. Use `!results {poll_msg_id}` to view the results.")
 
@@ -145,24 +301,38 @@ class Polls(commands.Cog):
             return
             
         # Extract message ID from link
-        try:
-            if poll_msg_link.isdigit():
-                poll_msg_id = int(poll_msg_link)
-            else:
-                # Extract message ID from Discord message link
-                match = re.search(r'/channels/\d+/\d+/(\d+)', poll_msg_link)
-                if match:
-                    poll_msg_id = int(match.group(1))
-                else:
-                    poll_msg_id = int(poll_msg_link.split('/')[-1])
-        except (ValueError, IndexError):
+        poll_msg_id = await self.extract_poll_id(poll_msg_link)
+        if poll_msg_id is None:
             await ctx.send("❌ Error: Invalid poll message link. Please provide a valid Discord message link or ID.")
             return
 
-        # Check if poll exists
+        # Check if poll exists in memory, if not try to get from cache/database
         if poll_msg_id not in self.polls:
-            await ctx.send("❌ Error: That message is not a valid poll.")
-            return
+            cached_poll = await self.get_poll_from_cache(poll_msg_id)
+            if cached_poll:
+                self.polls[poll_msg_id] = cached_poll
+            else:
+                # Try to get from database directly
+                db_poll = await db.find_one("polls", {"message_id": poll_msg_id})
+                if db_poll:
+                    # Convert string keys in voters dict back to integers
+                    voters = db_poll.get("voters", {})
+                    if isinstance(voters, dict):
+                        voters = {int(k): v for k, v in voters.items()}
+                    
+                    self.polls[poll_msg_id] = {
+                        'question': db_poll.get("question"),
+                        'options': db_poll.get("options"),
+                        'votes': db_poll.get("votes", {}),
+                        'voters': voters,
+                        'closed': db_poll.get("closed", False),
+                        'author_id': db_poll.get("author_id"),
+                        'channel_id': db_poll.get("channel_id"),
+                        'message_id': poll_msg_id
+                    }
+                else:
+                    await ctx.send("❌ Error: That message is not a valid poll.")
+                    return
 
         poll_data = self.polls[poll_msg_id]
         
@@ -222,8 +392,32 @@ class Polls(commands.Cog):
             return
 
         poll_msg_id = reaction.message.id
+        # Check if poll exists in memory, if not try to get from cache/database
         if poll_msg_id not in self.polls:
-            return
+            cached_poll = await self.get_poll_from_cache(poll_msg_id)
+            if cached_poll:
+                self.polls[poll_msg_id] = cached_poll
+            else:
+                # Try to get from database directly
+                db_poll = await db.find_one("polls", {"message_id": poll_msg_id})
+                if db_poll:
+                    # Convert string keys in voters dict back to integers
+                    voters = db_poll.get("voters", {})
+                    if isinstance(voters, dict):
+                        voters = {int(k): v for k, v in voters.items()}
+                    
+                    self.polls[poll_msg_id] = {
+                        'question': db_poll.get("question"),
+                        'options': db_poll.get("options"),
+                        'votes': db_poll.get("votes", {}),
+                        'voters': voters,
+                        'closed': db_poll.get("closed", False),
+                        'author_id': db_poll.get("author_id"),
+                        'channel_id': db_poll.get("channel_id"),
+                        'message_id': poll_msg_id
+                    }
+                else:
+                    return
 
         poll_data = self.polls[poll_msg_id]
         if poll_data['closed']:
@@ -241,6 +435,9 @@ class Polls(commands.Cog):
             # Store the user's vote, overwriting any previous vote
             poll_data['voters'][user.id] = option_idx
             
+            # Save updated poll data to database
+            await self.save_poll_to_db(poll_msg_id)
+            
             # Remove other reactions from this user on this poll
             try:
                 for r in reaction.message.reactions:
@@ -257,8 +454,32 @@ class Polls(commands.Cog):
             return
 
         poll_msg_id = reaction.message.id
+        # Check if poll exists in memory, if not try to get from cache/database
         if poll_msg_id not in self.polls:
-            return
+            cached_poll = await self.get_poll_from_cache(poll_msg_id)
+            if cached_poll:
+                self.polls[poll_msg_id] = cached_poll
+            else:
+                # Try to get from database directly
+                db_poll = await db.find_one("polls", {"message_id": poll_msg_id})
+                if db_poll:
+                    # Convert string keys in voters dict back to integers
+                    voters = db_poll.get("voters", {})
+                    if isinstance(voters, dict):
+                        voters = {int(k): v for k, v in voters.items()}
+                    
+                    self.polls[poll_msg_id] = {
+                        'question': db_poll.get("question"),
+                        'options': db_poll.get("options"),
+                        'votes': db_poll.get("votes", {}),
+                        'voters': voters,
+                        'closed': db_poll.get("closed", False),
+                        'author_id': db_poll.get("author_id"),
+                        'channel_id': db_poll.get("channel_id"),
+                        'message_id': poll_msg_id
+                    }
+                else:
+                    return
 
         poll_data = self.polls[poll_msg_id]
         if poll_data['closed']:
@@ -271,6 +492,9 @@ class Polls(commands.Cog):
             # If the user removed their reaction for their recorded vote, remove their vote
             if poll_data['voters'][user.id] == option_idx:
                 del poll_data['voters'][user.id]
+                
+                # Save updated poll data to database
+                await self.save_poll_to_db(poll_msg_id)
     
     @commands.command()
     async def pollhelp(self, ctx):

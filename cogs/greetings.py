@@ -1,9 +1,10 @@
 import discord
 from discord.ext import commands
-import aiofiles
 import random
 import datetime
-from typing import Optional, Dict, Tuple, List
+import json
+from typing import Optional, Dict, Tuple, List, Any
+from utils.database import db
 
 class Greeting(commands.Cog):
     def __init__(self, client):
@@ -16,12 +17,142 @@ class Greeting(commands.Cog):
         self.join_dm_messages = {}
         self.member_counter_channels = {}
         
+        # Load data from database when cog is initialized
+        self.client.loop.create_task(self.load_data())
+        
+    async def load_data(self):
+        """Load greeting configuration from MongoDB"""
+        try:
+            # Wait until bot is ready and database is connected
+            await self.client.wait_until_ready()
+            if not db.connected:
+                print("Database not connected. Greeting cog will use default empty settings.")
+                return
+                
+            # Load welcome channels and messages
+            try:
+                welcome_data = await db.find_many("welcome_channels", {})
+                for data in welcome_data:
+                    guild_id = data.get("guild_id")
+                    channel_id = data.get("channel_id")
+                    message = data.get("message")
+                    if guild_id and channel_id and message:
+                        self.welcome_channels[guild_id] = (channel_id, message)
+            except Exception as e:
+                print(f"Error loading welcome channels: {str(e)}")
+            
+            # Load goodbye channels and messages
+            try:
+                goodbye_data = await db.find_many("goodbye_channels", {})
+                for data in goodbye_data:
+                    guild_id = data.get("guild_id")
+                    channel_id = data.get("channel_id")
+                    message = data.get("message")
+                    if guild_id and channel_id and message:
+                        self.goodbye_channels[guild_id] = (channel_id, message)
+            except Exception as e:
+                print(f"Error loading goodbye channels: {str(e)}")
+            
+            # Load welcome embeds settings
+            try:
+                embed_data = await db.find_many("welcome_embeds", {})
+                for data in embed_data:
+                    guild_id = data.get("guild_id")
+                    enabled = data.get("enabled")
+                    if guild_id is not None and enabled is not None:
+                        self.welcome_embeds[guild_id] = enabled
+            except Exception as e:
+                print(f"Error loading welcome embeds: {str(e)}")
+            
+            # Load join DM settings
+            try:
+                join_dm_data = await db.find_many("join_dm", {})
+                for data in join_dm_data:
+                    guild_id = data.get("guild_id")
+                    enabled = data.get("enabled")
+                    message = data.get("message")
+                    if guild_id is not None and enabled is not None:
+                        self.join_dm_enabled[guild_id] = enabled
+                        if enabled and message:
+                            self.join_dm_messages[guild_id] = message
+            except Exception as e:
+                print(f"Error loading join DM settings: {str(e)}")
+            
+            # Load member counter settings
+            try:
+                counter_data = await db.find_many("member_counters", {})
+                for data in counter_data:
+                    guild_id = data.get("guild_id")
+                    channel_id = data.get("channel_id")
+                    format_string = data.get("format_string")
+                    if guild_id and channel_id and format_string:
+                        self.member_counter_channels[guild_id] = (channel_id, format_string)
+            except Exception as e:
+                print(f"Error loading member counters: {str(e)}")
+            
+            # Load random welcome messages
+            try:
+                random_welcome_data = await db.find_many("random_welcomes", {})
+                for data in random_welcome_data:
+                    guild_id = data.get("guild_id")
+                    message = data.get("message")
+                    if guild_id and message:
+                        if guild_id not in self.welcome_messages:
+                            self.welcome_messages[guild_id] = []
+                        self.welcome_messages[guild_id].append(message)
+            except Exception as e:
+                print(f"Error loading random welcome messages: {str(e)}")
+                    
+            # Cache frequently accessed data in Redis
+            try:
+                for guild_id, (channel_id, message) in self.welcome_channels.items():
+                    key = f"welcome_channel:{guild_id}"
+                    value = json.dumps({"channel_id": channel_id, "message": message})
+                    await db.redis_set(key, value, ex=3600)  # Cache for 1 hour
+                    
+                for guild_id, (channel_id, message) in self.goodbye_channels.items():
+                    key = f"goodbye_channel:{guild_id}"
+                    value = json.dumps({"channel_id": channel_id, "message": message})
+                    await db.redis_set(key, value, ex=3600)  # Cache for 1 hour
+            except Exception as e:
+                print(f"Error caching data in Redis: {str(e)}")
+                
+        except Exception as e:
+            print(f"Error loading greeting data: {str(e)}")
+            print("Greeting cog will use default empty settings.")
+    
+    async def get_welcome_channel_from_cache(self, guild_id):
+        """Try to get welcome channel info from Redis cache first"""
+        try:
+            key = f"welcome_channel:{guild_id}"
+            cached_data = await db.redis_get(key)
+            if cached_data:
+                data = json.loads(cached_data)
+                return data.get("channel_id"), data.get("message")
+            return None
+        except Exception:
+            return None
+    
+    async def get_goodbye_channel_from_cache(self, guild_id):
+        """Try to get goodbye channel info from Redis cache first"""
+        try:
+            key = f"goodbye_channel:{guild_id}"
+            cached_data = await db.redis_get(key)
+            if cached_data:
+                data = json.loads(cached_data)
+                return data.get("channel_id"), data.get("message")
+            return None
+        except Exception:
+            return None
+    
     def get_welcome_message(self, guild_id):
+        """Get welcome message from memory cache"""
         if guild_id in self.welcome_channels:
             return self.welcome_channels[guild_id][1]
         return None
 
     def get_goodbye_message(self, guild_id):
+        """Get goodbye message from memory cache"""
         if guild_id in self.goodbye_channels:
             return self.goodbye_channels[guild_id][1]
         return None
@@ -75,9 +206,22 @@ class Greeting(commands.Cog):
         self.welcome_channels[ctx.guild.id] = (new_channel.id, message)
         await ctx.send(f"Welcome channel has been set to: {new_channel.mention} with the message:\n{message}")
         
-        # Save to file
-        async with aiofiles.open("data/welcome_channels.txt", mode="a") as file:
-            await file.write(f"{ctx.guild.id} {new_channel.id} {message}\n")
+        # Save to MongoDB
+        try:
+            await db.update_one(
+                "welcome_channels",
+                {"guild_id": ctx.guild.id},
+                {"$set": {"channel_id": new_channel.id, "message": message}},
+                upsert=True
+            )
+            
+            # Cache in Redis
+            key = f"welcome_channel:{ctx.guild.id}"
+            value = json.dumps({"channel_id": new_channel.id, "message": message})
+            await db.redis_set(key, value, ex=3600)  # Cache for 1 hour
+        except Exception as e:
+            print(f"Error saving welcome channel: {str(e)}")
+            await ctx.send("Your settings have been saved in memory, but there was an error saving to the database.")
 
     @commands.command()
     @commands.has_permissions(manage_guild=True)
@@ -109,9 +253,22 @@ class Greeting(commands.Cog):
         self.goodbye_channels[ctx.guild.id] = (new_channel.id, message)
         await ctx.send(f"Goodbye channel has been set to: {new_channel.mention} with the message:\n{message}")
         
-        # Save to file
-        async with aiofiles.open("data/goodbye_channels.txt", mode="a") as file:
-            await file.write(f"{ctx.guild.id} {new_channel.id} {message}\n")
+        # Save to MongoDB
+        try:
+            await db.update_one(
+                "goodbye_channels",
+                {"guild_id": ctx.guild.id},
+                {"$set": {"channel_id": new_channel.id, "message": message}},
+                upsert=True
+            )
+            
+            # Cache in Redis
+            key = f"goodbye_channel:{ctx.guild.id}"
+            value = json.dumps({"channel_id": new_channel.id, "message": message})
+            await db.redis_set(key, value, ex=3600)  # Cache for 1 hour
+        except Exception as e:
+            print(f"Error saving goodbye channel: {str(e)}")
+            await ctx.send("Your settings have been saved in memory, but there was an error saving to the database.")
 
     @commands.command()
     async def preview_welcome(self, ctx):
@@ -190,9 +347,21 @@ class Greeting(commands.Cog):
         self.welcome_embeds[ctx.guild.id] = enabled
         await ctx.send(f"Welcome embeds have been {'enabled' if enabled else 'disabled'}.")
         
-        # Save to file
-        async with aiofiles.open("data/welcome_embeds.txt", mode="a") as file:
-            await file.write(f"{ctx.guild.id} {1 if enabled else 0}\n")
+        # Save to MongoDB
+        try:
+            await db.update_one(
+                "welcome_embeds",
+                {"guild_id": ctx.guild.id},
+                {"$set": {"enabled": enabled}},
+                upsert=True
+            )
+            
+            # Cache in Redis
+            key = f"welcome_embeds:{ctx.guild.id}"
+            await db.redis_set(key, "1" if enabled else "0", ex=3600)  # Cache for 1 hour
+        except Exception as e:
+            print(f"Error saving welcome embeds setting: {str(e)}")
+            await ctx.send("Your settings have been saved in memory, but there was an error saving to the database.")
 
     @commands.command()
     @commands.has_permissions(manage_guild=True)
@@ -230,12 +399,26 @@ class Greeting(commands.Cog):
         else:
             await ctx.send("Join DMs have been disabled.")
             
-        # Save to file
-        async with aiofiles.open("data/join_dm.txt", mode="a") as file:
+        # Save to MongoDB
+        try:
+            data = {"enabled": enabled}
             if enabled:
-                await file.write(f"{ctx.guild.id} 1 {message}\n")
-            else:
-                await file.write(f"{ctx.guild.id} 0\n")
+                data["message"] = message
+                
+            await db.update_one(
+                "join_dm",
+                {"guild_id": ctx.guild.id},
+                {"$set": data},
+                upsert=True
+            )
+            
+            # Cache in Redis
+            key = f"join_dm:{ctx.guild.id}"
+            value = json.dumps({"enabled": enabled, "message": message if enabled else ""})
+            await db.redis_set(key, value, ex=3600)  # Cache for 1 hour
+        except Exception as e:
+            print(f"Error saving join DM settings: {str(e)}")
+            await ctx.send("Your settings have been saved in memory, but there was an error saving to the database.")
 
     @commands.command()
     @commands.has_permissions(manage_guild=True)
@@ -252,9 +435,22 @@ class Greeting(commands.Cog):
             await channel.edit(name=format_string.replace("{count}", str(ctx.guild.member_count)))
             await ctx.send(f"Member counter has been set to {channel.mention} with format: {format_string}")
             
-            # Save to file
-            async with aiofiles.open("data/member_counters.txt", mode="a") as file:
-                await file.write(f"{ctx.guild.id} {channel.id} {format_string}\n")
+            # Save to MongoDB
+            try:
+                await db.update_one(
+                    "member_counters",
+                    {"guild_id": ctx.guild.id},
+                    {"$set": {"channel_id": channel.id, "format_string": format_string}},
+                    upsert=True
+                )
+                
+                # Cache in Redis
+                key = f"member_counter:{ctx.guild.id}"
+                value = json.dumps({"channel_id": channel.id, "format_string": format_string})
+                await db.redis_set(key, value, ex=3600)  # Cache for 1 hour
+            except Exception as e:
+                print(f"Error saving member counter: {str(e)}")
+                await ctx.send("Your settings have been saved in memory, but there was an error saving to the database.")
         except discord.Forbidden:
             await ctx.send("I don't have permission to edit that channel.")
         except Exception as e:
@@ -270,9 +466,32 @@ class Greeting(commands.Cog):
         self.welcome_messages[ctx.guild.id].append(message)
         await ctx.send(f"Added new random welcome message:\n{message}")
         
-        # Save to file
-        async with aiofiles.open("data/random_welcomes.txt", mode="a") as file:
-            await file.write(f"{ctx.guild.id} {message}\n")
+        # Save to MongoDB
+        try:
+            await db.insert_one(
+                "random_welcomes",
+                {"guild_id": ctx.guild.id, "message": message}
+            )
+            
+            # Update Redis cache
+            key = f"random_welcomes:{ctx.guild.id}"
+            messages = await db.redis_lrange(key, 0, -1)
+            if not messages:
+                # If not in cache, add this message
+                await db.redis_rpush(key, message)
+                await db.redis_expire(key, 3600)  # Cache for 1 hour
+            else:
+                # Add to existing cache
+                await db.redis_rpush(key, message)
+                await db.redis_expire(key, 3600)  # Refresh expiration
+        except Exception as e:
+            print(f"Error saving random welcome message: {str(e)}")
+            await ctx.send("Your message has been saved in memory, but there was an error saving to the database.")
+            
+            # Still add to memory cache even if database fails
+            if ctx.guild.id not in self.welcome_messages:
+                self.welcome_messages[ctx.guild.id] = []
+            self.welcome_messages[ctx.guild.id].append(message)
 
     @commands.command()
     @commands.has_permissions(manage_guild=True)
@@ -295,22 +514,59 @@ class Greeting(commands.Cog):
         """Handle member join events"""
         guild_id = member.guild.id
         
-        # Send welcome message if configured
-        if guild_id in self.welcome_channels:
+        # Try to get welcome channel info from Redis cache first
+        welcome_channel_info = None
+        if db.connected:
+            welcome_channel_info = await self.get_welcome_channel_from_cache(guild_id)
+        
+        # If not in Redis, use memory cache
+        if welcome_channel_info:
+            channel_id, welcome_message = welcome_channel_info
+        elif guild_id in self.welcome_channels:
             channel_id = self.welcome_channels[guild_id][0]
-            channel = member.guild.get_channel(channel_id)
+            welcome_message = self.welcome_channels[guild_id][1]
+        else:
+            # No welcome channel configured
+            channel_id = None
+            welcome_message = None
+        
+        # Send welcome message if configured
+        if channel_id:
+            channel = member.guild.get_channel(int(channel_id))
             
             if channel:
+                # Try to get random welcome messages from Redis
+                random_messages = []
+                if db.connected:
+                    key = f"random_welcomes:{guild_id}"
+                    random_messages = await db.redis_lrange(key, 0, -1)
+                
+                # If not in Redis, use memory cache
+                if not random_messages and guild_id in self.welcome_messages and self.welcome_messages[guild_id]:
+                    random_messages = self.welcome_messages[guild_id]
+                
                 # Get message - either random or fixed
-                if guild_id in self.welcome_messages and self.welcome_messages[guild_id]:
-                    message = random.choice(self.welcome_messages[guild_id])
+                if random_messages:
+                    message = random.choice(random_messages)
                 else:
-                    message = self.welcome_channels[guild_id][1]
+                    message = welcome_message
                     
                 formatted_message = self.format_welcome_message(message, member)
                 
+                # Check if welcome embed is enabled from Redis
+                use_embed = False
+                if db.connected:
+                    key = f"welcome_embeds:{guild_id}"
+                    embed_enabled = await db.redis_get(key)
+                    if embed_enabled is not None:
+                        use_embed = embed_enabled == "1"
+                    else:
+                        use_embed = guild_id in self.welcome_embeds and self.welcome_embeds[guild_id]
+                else:
+                    use_embed = guild_id in self.welcome_embeds and self.welcome_embeds[guild_id]
+                
                 # Send as embed if enabled
-                if guild_id in self.welcome_embeds and self.welcome_embeds[guild_id]:
+                if use_embed:
                     embed = discord.Embed(
                         title=f"Welcome to {member.guild.name}!",
                         description=formatted_message,
@@ -322,20 +578,59 @@ class Greeting(commands.Cog):
                 else:
                     await channel.send(formatted_message)
         
+        # Check if join DM is enabled from Redis first
+        join_dm_enabled = False
+        join_dm_message = None
+        
+        if db.connected:
+            key = f"join_dm:{guild_id}"
+            cached_data = await db.redis_get(key)
+            if cached_data:
+                try:
+                    data = json.loads(cached_data)
+                    join_dm_enabled = data.get("enabled", False)
+                    join_dm_message = data.get("message", "")
+                except:
+                    pass
+        
+        # If not in Redis, use memory cache
+        if join_dm_message is None:
+            join_dm_enabled = guild_id in self.join_dm_enabled and self.join_dm_enabled[guild_id]
+            if join_dm_enabled:
+                join_dm_message = self.join_dm_messages.get(guild_id, f"Welcome to {member.guild.name}!")
+        
         # Send DM if enabled
-        if guild_id in self.join_dm_enabled and self.join_dm_enabled[guild_id]:
+        if join_dm_enabled and join_dm_message:
             try:
-                message = self.join_dm_messages.get(guild_id, f"Welcome to {member.guild.name}!")
-                formatted_message = self.format_welcome_message(message, member)
+                formatted_message = self.format_welcome_message(join_dm_message, member)
                 await member.send(formatted_message)
             except discord.Forbidden:
                 # Can't send DM to this user
                 pass
         
+        # Try to get member counter info from Redis first
+        member_counter_info = None
+        if db.connected:
+            key = f"member_counter:{guild_id}"
+            cached_data = await db.redis_get(key)
+            if cached_data:
+                try:
+                    data = json.loads(cached_data)
+                    channel_id = data.get("channel_id")
+                    format_string = data.get("format_string")
+                    if channel_id and format_string:
+                        member_counter_info = (channel_id, format_string)
+                except:
+                    pass
+        
+        # If not in Redis, use memory cache
+        if not member_counter_info and guild_id in self.member_counter_channels:
+            member_counter_info = self.member_counter_channels[guild_id]
+        
         # Update member counter if configured
-        if guild_id in self.member_counter_channels:
-            channel_id, format_string = self.member_counter_channels[guild_id]
-            channel = member.guild.get_channel(channel_id)
+        if member_counter_info:
+            channel_id, format_string = member_counter_info
+            channel = member.guild.get_channel(int(channel_id))
             
             if channel:
                 try:
@@ -348,20 +643,53 @@ class Greeting(commands.Cog):
         """Handle member leave events"""
         guild_id = member.guild.id
         
-        # Send goodbye message if configured
-        if guild_id in self.goodbye_channels:
+        # Try to get goodbye channel info from Redis cache first
+        goodbye_channel_info = None
+        if db.connected:
+            goodbye_channel_info = await self.get_goodbye_channel_from_cache(guild_id)
+        
+        # If not in Redis, use memory cache
+        if goodbye_channel_info:
+            channel_id, goodbye_message = goodbye_channel_info
+        elif guild_id in self.goodbye_channels:
             channel_id = self.goodbye_channels[guild_id][0]
-            channel = member.guild.get_channel(channel_id)
+            goodbye_message = self.goodbye_channels[guild_id][1]
+        else:
+            # No goodbye channel configured
+            channel_id = None
+            goodbye_message = None
+        
+        # Send goodbye message if configured
+        if channel_id:
+            channel = member.guild.get_channel(int(channel_id))
             
             if channel:
-                message = self.goodbye_channels[guild_id][1]
-                formatted_message = self.format_welcome_message(message, member)
+                formatted_message = self.format_welcome_message(goodbye_message, member)
                 await channel.send(formatted_message)
         
+        # Try to get member counter info from Redis first
+        member_counter_info = None
+        if db.connected:
+            key = f"member_counter:{guild_id}"
+            cached_data = await db.redis_get(key)
+            if cached_data:
+                try:
+                    data = json.loads(cached_data)
+                    channel_id = data.get("channel_id")
+                    format_string = data.get("format_string")
+                    if channel_id and format_string:
+                        member_counter_info = (channel_id, format_string)
+                except:
+                    pass
+        
+        # If not in Redis, use memory cache
+        if not member_counter_info and guild_id in self.member_counter_channels:
+            member_counter_info = self.member_counter_channels[guild_id]
+        
         # Update member counter if configured
-        if guild_id in self.member_counter_channels:
-            channel_id, format_string = self.member_counter_channels[guild_id]
-            channel = member.guild.get_channel(channel_id)
+        if member_counter_info:
+            channel_id, format_string = member_counter_info
+            channel = member.guild.get_channel(int(channel_id))
             
             if channel:
                 try:

@@ -1,15 +1,15 @@
 import discord
 from discord.ext import commands
 import datetime
-import aiofiles
 import asyncio
 import aiohttp
 import logging
 import os
 
-from config.config import BOT_TOKEN
+from config.config import BOT_TOKEN, MONGO_URI, REDIS_URI
 from config.logging_config import setup_logging
 from utils.ffmpeg_check import check_ffmpeg, get_ffmpeg_path
+from utils.database import db
 from cogs.role import Role
 from cogs.greetings import Greeting
 from cogs.moderation import Moderation
@@ -40,57 +40,35 @@ async def on_ready():
         music_logger.error("Music functionality may not work without FFmpeg!")
         print("\033[91mWARNING: FFmpeg is not properly installed. Music functionality may not work!\033[0m")
     
-    client.reaction_roles = []
-    client.welcome_channels = {}
-    client.goodbye_channels = {}
+    # Initialize database connections
+    db_logger = logging.getLogger('bot.database')
+    db_connected = await db.connect(MONGO_URI, REDIS_URI)
+    if db_connected:
+        db_logger.info("Successfully connected to MongoDB and Redis")
+    else:
+        db_logger.error("Failed to connect to databases. Bot may not function correctly!")
+        print("\033[91mWARNING: Database connection failed. Bot may not function correctly!\033[0m")
+    
+    # Initialize data structures
     client.warnings = {}
-
     for guild in client.guilds:
         client.warnings[guild.id] = {}
-
-    # Initialize data files in the data directory
-    data_files = ["data/reaction_roles.txt", "data/welcome_channels.txt", "data/goodbye_channels.txt"]
-    for file in data_files:
-        async with aiofiles.open(file, mode="a") as temp:
-            pass
-
-    async with aiofiles.open("data/reaction_roles.txt", mode="r") as file:
-        lines = await file.readlines()
-        for line in lines:
-            data = line.split(" ")
-            client.reaction_roles.append((int(data[0]), int(data[1]), data[2].strip("\n")))
-
-    async with aiofiles.open("data/welcome_channels.txt", mode="r") as file:
-        lines = await file.readlines()
-        for line in lines:
-            data = line.split(" ")
-            client.welcome_channels[int(data[0])] = (int(data[1]), " ".join(data[2:]).strip("\n"))
-
-    async with aiofiles.open("data/goodbye_channels.txt", mode="r") as file:
-        lines = await file.readlines()
-        for line in lines:
-            data = line.split(" ")
-            client.goodbye_channels[int(data[0])] = (int(data[1]), " ".join(data[2:]).strip("\n"))
-
-    for guild in client.guilds:
-        async with aiofiles.open(f"{guild.id}.txt", mode="a") as temp:
-            pass
-
-        async with aiofiles.open(f"{guild.id}.txt", mode="r") as file:
-            lines = await file.readlines()
-
-            for line in lines:
-                data = line.split(" ")
-                member_id = int(data[0])
-                admin_id = int(data[1])
-                reason = " ".join(data[2:]).strip("\n")
-
-                try:
-                    client.warnings[guild.id][member_id][0] += 1
-                    client.warnings[guild.id][member_id][1].append((admin_id, reason))
-                except KeyError:
-                    client.warnings[guild.id][member_id] = [1, [(admin_id, reason)]]
-
+        
+        # Load warnings from MongoDB
+        warnings_data = await db.find_many("warnings", {"guild_id": guild.id})
+        for warning in warnings_data:
+            member_id = warning["member_id"]
+            admin_id = warning["admin_id"]
+            reason = warning["reason"]
+            
+            try:
+                if member_id not in client.warnings[guild.id]:
+                    client.warnings[guild.id][member_id] = [0, []]
+                client.warnings[guild.id][member_id][0] += 1
+                client.warnings[guild.id][member_id][1].append((admin_id, reason))
+            except Exception as e:
+                db_logger.error(f"Error loading warning: {str(e)}")
+    
     print("The client is online")
     print("------------------")    
             
@@ -117,4 +95,6 @@ if __name__ == "__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
+        # Close database connections before exiting
+        asyncio.run(db.close())
         asyncio.run(client.close())

@@ -1,6 +1,7 @@
 import discord
 from discord.ext import commands
-import aiofiles
+from utils.database import db
+import json
 
 class Role(commands.Cog):
     def __init__(self, client):
@@ -94,11 +95,19 @@ class Role(commands.Cog):
             self.reaction_roles.append((role.id, msg.id, str(emoji.encode("utf-8"))))
 
             try:
-                async with aiofiles.open("reaction_roles.txt", mode="a") as file:
-                    emoji_utf = emoji.encode("utf-8")
-                    await file.write(f"{role.id} {msg.id} {emoji_utf}\n")
-            except IOError as e:
-                await ctx.send(f"⚠️ Warning: Reaction role was set but could not be saved to file: {str(e)}")
+                # Store in MongoDB for persistence
+                await db.insert_one("reaction_roles", {
+                    "guild_id": ctx.guild.id,
+                    "role_id": role.id,
+                    "message_id": msg.id,
+                    "emoji": str(emoji.encode("utf-8"))
+                })
+                
+                # Cache in Redis for quick access
+                reaction_key = f"reaction:{msg.id}:{str(emoji.encode('utf-8'))}"
+                await db.redis_set(reaction_key, str(role.id))
+            except Exception as e:
+                await ctx.send(f"⚠️ Warning: Reaction role was set but could not be saved to database: {str(e)}")
                 return
 
             await ctx.send(f"✅ Success: Reaction role has been set! Users who react with {emoji} will receive the '{role.name}' role.")            
@@ -335,25 +344,28 @@ class Role(commands.Cog):
     async def load_reaction_roles(self):
         try:
             self.reaction_roles = []
-            async with aiofiles.open("reaction_roles.txt", mode="r") as file:
-                async for line in file:
-                    try:
-                        line = line.strip()
-                        if line:
-                            parts = line.split(" ", 2)
-                            if len(parts) == 3:
-                                role_id = int(parts[0])
-                                msg_id = int(parts[1])
-                                emoji = parts[2]
-                                self.reaction_roles.append((role_id, msg_id, emoji))
-                    except Exception as e:
-                        print(f"Error parsing reaction role line: {str(e)}")
-            print(f"Loaded {len(self.reaction_roles)} reaction roles")
-        except FileNotFoundError:
-            # File doesn't exist yet, which is fine for first run
-            pass
+            
+            # Load from MongoDB
+            reaction_roles_data = await db.find_many("reaction_roles", {})
+            
+            for role_data in reaction_roles_data:
+                try:
+                    role_id = role_data["role_id"]
+                    msg_id = role_data["message_id"]
+                    emoji = role_data["emoji"]
+                    
+                    # Add to in-memory list
+                    self.reaction_roles.append((role_id, msg_id, emoji))
+                    
+                    # Cache in Redis for quick access
+                    reaction_key = f"reaction:{msg_id}:{emoji}"
+                    await db.redis_set(reaction_key, str(role_id))
+                except Exception as e:
+                    print(f"Error parsing reaction role data: {str(e)}")
+            
+            print(f"Loaded {len(self.reaction_roles)} reaction roles from database")
         except Exception as e:
-            print(f"Error loading reaction roles: {str(e)}")
+            print(f"Error loading reaction roles from database: {str(e)}")
 
     @commands.command()
     async def change_permissions(self, ctx, role: discord.Role = None, **perms):
