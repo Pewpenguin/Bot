@@ -4,9 +4,11 @@ import yt_dlp
 import re
 import itertools
 import logging
+import json
 from discord.ext import commands
 from async_timeout import timeout
 from functools import partial
+from utils.database import db
 
 logger = logging.getLogger('music')
 
@@ -124,7 +126,7 @@ class MusicPlayer:
     When the bot disconnects from the Voice it's instance will be destroyed.
     """
 
-    __slots__ = ('bot', 'guild', 'channel', 'cog', 'queue', 'next', 'current', 'volume')
+    __slots__ = ('bot', 'guild', 'channel', 'cog', 'queue', 'next', 'current', 'volume', 'repeat_mode')
 
     def __init__(self, ctx):
         self.bot = ctx.bot
@@ -137,9 +139,45 @@ class MusicPlayer:
         
         self.volume = 0.5
         self.current = None
+        self.repeat_mode = "off"  # off, single, queue
         
         ctx.bot.loop.create_task(self.player_loop())
+        ctx.bot.loop.create_task(self._load_settings())
+        ctx.bot.loop.create_task(self._load_queue())
 
+    async def _load_settings(self):
+        """Load music settings from the database"""
+        try:
+            settings = await db.get_music_settings(str(self.guild.id))
+            self.volume = settings.get("volume", 0.5)
+            self.repeat_mode = settings.get("repeat_mode", "off")
+            logger.info(f"Loaded music settings for guild: {self.guild.id}")
+        except Exception as e:
+            logger.error(f"Error loading music settings: {str(e)}", exc_info=True)
+    
+    async def _load_queue(self):
+        """Load the music queue from Redis"""
+        try:
+            queue_data = await db.get_music_queue(str(self.guild.id))
+            for track in queue_data:
+                await self.queue.put(track)
+            logger.info(f"Loaded {len(queue_data)} tracks from queue for guild: {self.guild.id}")
+            
+            # Also try to load current track
+            current_track = await db.get_current_track(str(self.guild.id))
+            if current_track:
+                logger.info(f"Loaded current track: {current_track.get('title')} for guild: {self.guild.id}")
+        except Exception as e:
+            logger.error(f"Error loading music queue: {str(e)}", exc_info=True)
+    
+    async def _save_to_queue(self, track):
+        """Save a track to the Redis queue"""
+        try:
+            await db.add_to_music_queue(str(self.guild.id), track)
+            logger.debug(f"Saved track to queue: {track.get('title')}")
+        except Exception as e:
+            logger.error(f"Error saving track to queue: {str(e)}", exc_info=True)
+    
     async def player_loop(self):
         """Our main player loop."""
         logger.info(f"Starting player loop for guild: {self.guild.id}")
@@ -165,6 +203,18 @@ class MusicPlayer:
                 source.volume = self.volume
                 self.current = source
                 
+                # Save current track to Redis
+                current_data = {
+                    'url': source.url,
+                    'title': source.title,
+                    'duration': source.duration,
+                    'thumbnail': source.thumbnail,
+                    'requester_id': source.requester.id,
+                    'requester_name': source.requester.display_name,
+                    'uploader': source.uploader
+                }
+                await db.set_current_track(str(self.guild.id), current_data)
+                
                 if not self.guild.voice_client or not self.guild.voice_client.is_connected():
                     logger.error(f"Voice client disconnected before playback could start for guild: {self.guild.id}")
                     continue
@@ -177,7 +227,7 @@ class MusicPlayer:
                 embed.add_field(name="Duration", value=self.parse_duration(source.duration))
                 embed.add_field(name="Requested by", value=source.requester.mention)
                 embed.add_field(name="Uploader", value=source.uploader)
-                embed.set_footer(text=f"Volume: {self.volume*100}%")
+                embed.set_footer(text=f"Volume: {self.volume*100}% | Repeat: {self.repeat_mode}")
                 await self.channel.send(embed=embed)
                 
                 logger.debug(f"Waiting for song to finish: {source.title} in guild: {self.guild.id}")
@@ -191,6 +241,56 @@ class MusicPlayer:
                 if source:
                     logger.debug(f"Cleaning up FFmpeg process for: {source.title}")
                     source.cleanup()
+                
+                # Handle repeat modes
+                if self.repeat_mode == "single" and self.current:
+                    # Put the current song back in the queue
+                    current_data = {
+                        'url': source.url,
+                        'title': source.title,
+                        'duration': source.duration,
+                        'thumbnail': source.thumbnail,
+                        'requester': source.requester,
+                        'uploader': source.uploader
+                    }
+                    await self.queue.put(current_data)
+                    await self._save_to_queue(current_data)
+                elif self.repeat_mode == "queue" and self.queue.empty():
+                    # If queue is empty and repeat mode is queue, reload all tracks
+                    logger.info(f"Queue repeat mode: reloading all tracks for guild: {self.guild.id}")
+                    try:
+                        # Get all tracks from Redis
+                        queue_data = await db.get_music_queue(str(self.guild.id))
+                        if not queue_data and self.current:
+                            # If Redis queue is empty but we have a current track, add it back
+                            current_data = {
+                                'url': source.url,
+                                'title': source.title,
+                                'duration': source.duration,
+                                'thumbnail': source.thumbnail,
+                                'requester': source.requester,
+                                'uploader': source.uploader
+                            }
+                            await self.queue.put(current_data)
+                            await self._save_to_queue(current_data)
+                        else:
+                            # Add all tracks back to the queue
+                            for track in queue_data:
+                                # Make sure requester is an object, not just an ID
+                                if isinstance(track.get('requester'), dict) and 'id' in track['requester']:
+                                    # Try to get the member object
+                                    member = self.guild.get_member(int(track['requester']['id']))
+                                    if member:
+                                        track['requester'] = member
+                                
+                                await self.queue.put(track)
+                                # No need to save to Redis as they're already there
+                    except Exception as e:
+                        logger.error(f"Error reloading queue in repeat mode: {str(e)}", exc_info=True)
+                
+                # Only clear current track from Redis if not in repeat mode
+                if self.repeat_mode != "single":
+                    await db.clear_current_track(str(self.guild.id))
                 self.current = None
                 logger.debug(f"Playback finished for guild: {self.guild.id}")
     
@@ -217,7 +317,21 @@ class MusicPlayer:
 
     def destroy(self, guild):
         """Disconnect and cleanup the player."""
+        # Save settings before destroying
+        self.bot.loop.create_task(self._save_settings())
         return self.bot.loop.create_task(self.cog.cleanup(guild))
+        
+    async def _save_settings(self):
+        """Save music settings to the database"""
+        try:
+            settings = {
+                "volume": self.volume,
+                "repeat_mode": self.repeat_mode
+            }
+            await db.update_music_settings(str(self.guild.id), settings)
+            logger.info(f"Saved music settings for guild: {self.guild.id}")
+        except Exception as e:
+            logger.error(f"Error saving music settings: {str(e)}", exc_info=True)
 
 
 class Music(commands.Cog):
@@ -240,6 +354,12 @@ class Music(commands.Cog):
     async def cleanup(self, guild):
         logger.info(f"Cleaning up player for guild: {guild.id}")
         try:
+            # Save current queue to Redis before disconnecting
+            if guild.id in self.players:
+                player = self.players[guild.id]
+                if player.current:
+                    await db.clear_current_track(str(guild.id))
+            
             await guild.voice_client.disconnect()
             logger.debug(f"Voice client disconnected for guild: {guild.id}")
         except AttributeError:
@@ -370,7 +490,10 @@ class Music(commands.Cog):
                 await ctx.send(f'An error occurred while processing this request: {str(e)}')
             else:
                 logger.info(f"Adding {source['title']} to the queue")
+                # Add to memory queue
                 await player.queue.put(source)
+                # Save to Redis queue
+                await player._save_to_queue(source)
                 await ctx.send(f'**{source["title"]}** has been added to the queue.')
                 logger.debug(f"Queue size after adding song: {player.queue.qsize()}")
 
@@ -435,7 +558,7 @@ class Music(commands.Cog):
         vc.stop()
         await ctx.send(f'**{ctx.author}**: Skipped the song!')
 
-    @commands.command(name='queue', aliases=['q', 'playlist'])
+    @commands.command(name='queue', aliases=['q'])
     async def queue_info(self, ctx):
         """Display the current music queue.
         
@@ -446,22 +569,47 @@ class Music(commands.Cog):
         !queue
         
         Aliases:
-        !q, !playlist
+        !q
         """
         vc = ctx.voice_client
         
         if not vc or not vc.is_connected():
             return await ctx.send('I am not currently connected to voice!')
         
-        player = self.get_player(ctx)
-        if player.queue.empty():
+        # Get queue from Redis to ensure it's up to date
+        queue_data = await db.get_music_queue(str(ctx.guild.id))
+        
+        if not queue_data:
             return await ctx.send('There are currently no more queued songs.')
         
-        # Grab up to 5 entries from the queue...
-        upcoming = list(itertools.islice(player.queue._queue, 0, 5))
+        # Get current track
+        current = await db.get_current_track(str(ctx.guild.id))
         
-        fmt = '\n'.join(f'**`{_["title"]}`**' for _ in upcoming)
-        embed = discord.Embed(title=f'Upcoming - Next {len(upcoming)}', description=fmt, color=discord.Color.green())
+        # Create embed
+        embed = discord.Embed(title="Music Queue", color=discord.Color.green())
+        
+        # Add current track
+        if current:
+            embed.add_field(
+                name="Currently Playing:", 
+                value=f"[{current['title']}]({current.get('url', 'https://youtube.com')})", 
+                inline=False
+            )
+        
+        # Add queue tracks (up to 10)
+        queue_list = []
+        for i, track in enumerate(queue_data[:10]):
+            queue_list.append(f"`{i+1}.` {track['title']}")
+        
+        if queue_list:
+            embed.add_field(
+                name=f"Upcoming - Next {len(queue_list)}", 
+                value="\n".join(queue_list), 
+                inline=False
+            )
+            
+            if len(queue_data) > 10:
+                embed.set_footer(text=f"And {len(queue_data) - 10} more songs in queue")
         
         await ctx.send(embed=embed)
 
@@ -497,7 +645,7 @@ class Music(commands.Cog):
         await ctx.send(embed=embed)
 
     @commands.command(name='volume', aliases=['vol'])
-    async def change_volume(self, ctx, *, vol: float=None):
+    async def change_volume(self, ctx, *, volume: float=None):
         """Change or display the music volume.
         
         Adjusts the volume of the currently playing music.
@@ -521,15 +669,23 @@ class Music(commands.Cog):
         if not vc or not vc.is_connected():
             return await ctx.send('I am not currently connected to voice!')
         
+        player = self.get_player(ctx)
+        
+        # If no volume specified, display current volume
+        if volume is None:
+            return await ctx.send(f'Current volume: **{int(player.volume * 100)}%**')
+        
         if not 0 < volume < 101:
             return await ctx.send('Please enter a value between 1 and 100.')
-        
-        player = self.get_player(ctx)
         
         if vc.source:
             vc.source.volume = volume / 100
         
         player.volume = volume / 100
+        
+        # Save volume setting to database
+        await db.update_music_settings(str(ctx.guild.id), {"volume": player.volume})
+        
         await ctx.send(f'**{ctx.author}**: Set the volume to **{volume}%**')
 
     @commands.command(name='stop')
@@ -542,6 +698,10 @@ class Music(commands.Cog):
         
         if not vc or not vc.is_connected():
             return await ctx.send('I am not currently playing anything!')
+        
+        # Clear the queue in Redis
+        await db.clear_music_queue(str(ctx.guild.id))
+        await db.clear_current_track(str(ctx.guild.id))
         
         await self.cleanup(ctx.guild)
         await ctx.send(f'**{ctx.author}**: Stopped the music!')
@@ -557,5 +717,381 @@ class Music(commands.Cog):
         if not vc or not vc.is_connected():
             return await ctx.send('I am not currently connected to voice!')
         
+        # Clear the queue in Redis
+        await db.clear_music_queue(str(ctx.guild.id))
+        await db.clear_current_track(str(ctx.guild.id))
+        
         await self.cleanup(ctx.guild)
         await ctx.send(f'**{ctx.author}**: Disconnected from voice channel.')
+        
+    @commands.command(name='repeat', aliases=['loop'])
+    async def repeat_(self, ctx, mode: str = None):
+        """Set the repeat mode for the music player.
+        
+        Changes how songs are repeated after they finish playing.
+        
+        Usage:
+        !repeat [mode]
+        
+        Parameters:
+        - mode: The repeat mode to set (off, single, queue)
+        
+        Examples:
+        !repeat off - Turn off repeat
+        !repeat single - Repeat the current song
+        !repeat queue - Repeat the entire queue
+        
+        Aliases:
+        !loop
+        """
+        vc = ctx.voice_client
+        
+        if not vc or not vc.is_connected():
+            return await ctx.send('I am not currently connected to voice!')
+        
+        player = self.get_player(ctx)
+        
+        # If no mode specified, display current mode
+        if mode is None:
+            return await ctx.send(f'Current repeat mode: **{player.repeat_mode}**')
+        
+        # Validate mode
+        mode = mode.lower()
+        if mode not in ['off', 'single', 'queue']:
+            return await ctx.send('Invalid repeat mode. Please use: off, single, or queue.')
+        
+        # Set mode
+        player.repeat_mode = mode
+        
+        # Save to database
+        await db.update_music_settings(str(ctx.guild.id), {"repeat_mode": mode})
+        
+        await ctx.send(f'**{ctx.author}**: Set repeat mode to **{mode}**')
+    
+    # Playlist commands
+    @commands.group(name='playlist', aliases=['pl'], invoke_without_command=True)
+    async def playlist_(self, ctx):
+        """Manage your music playlists.
+        
+        Use subcommands to create, view, and manage your playlists.
+        
+        Usage:
+        !playlist create <name> - Create a new playlist
+        !playlist list - List your playlists
+        !playlist view <name> - View songs in a playlist
+        !playlist add <name> <song> - Add a song to a playlist
+        !playlist remove <name> <index> - Remove a song from a playlist
+        !playlist play <name> - Play a playlist
+        !playlist delete <name> - Delete a playlist
+        
+        Aliases:
+        !pl
+        """
+        await ctx.send_help(ctx.command)
+    
+    @playlist_.command(name='create')
+    async def playlist_create(self, ctx, *, name: str):
+        """Create a new playlist.
+        
+        Creates an empty playlist that you can add songs to later.
+        
+        Usage:
+        !playlist create <name>
+        
+        Parameters:
+        - name: The name for your new playlist
+        
+        Examples:
+        !playlist create My Favorites
+        """
+        # Check if user already has a playlist with this name
+        user_playlists = await db.get_playlists(str(ctx.author.id))
+        for playlist in user_playlists:
+            if playlist['name'].lower() == name.lower():
+                return await ctx.send(f'You already have a playlist named **{name}**. Please choose a different name.')
+        
+        # Create the playlist
+        playlist = await db.create_playlist(str(ctx.author.id), name)
+        
+        await ctx.send(f'Created new playlist: **{name}**')
+    
+    @playlist_.command(name='list')
+    async def playlist_list(self, ctx):
+        """List all your playlists.
+        
+        Shows all playlists you've created with their names and track counts.
+        
+        Usage:
+        !playlist list
+        """
+        playlists = await db.get_playlists(str(ctx.author.id))
+        
+        if not playlists:
+            return await ctx.send("You don't have any playlists yet. Create one with `!playlist create <name>`")
+        
+        embed = discord.Embed(title=f"{ctx.author.display_name}'s Playlists", color=discord.Color.blue())
+        
+        for playlist in playlists:
+            track_count = len(playlist.get('tracks', []))
+            embed.add_field(
+                name=playlist['name'],
+                value=f"{track_count} tracks",
+                inline=False
+            )
+        
+        await ctx.send(embed=embed)
+    
+    @playlist_.command(name='view')
+    async def playlist_view(self, ctx, *, name: str):
+        """View the songs in a playlist.
+        
+        Shows all songs in the specified playlist with their titles.
+        
+        Usage:
+        !playlist view <name>
+        
+        Parameters:
+        - name: The name of the playlist to view
+        
+        Examples:
+        !playlist view My Favorites
+        """
+        # Find the playlist
+        playlists = await db.get_playlists(str(ctx.author.id))
+        playlist = None
+        
+        for p in playlists:
+            if p['name'].lower() == name.lower():
+                playlist = p
+                break
+        
+        if not playlist:
+            return await ctx.send(f"You don't have a playlist named **{name}**")
+        
+        tracks = playlist.get('tracks', [])
+        
+        if not tracks:
+            return await ctx.send(f"Your playlist **{name}** is empty. Add songs with `!playlist add {name} <song>`")
+        
+        embed = discord.Embed(title=f"Playlist: {playlist['name']}", color=discord.Color.blue())
+        
+        # Add tracks (up to 15)
+        track_list = []
+        for i, track in enumerate(tracks[:15]):
+            track_list.append(f"`{i+1}.` {track['title']}")
+        
+        embed.add_field(
+            name=f"Tracks ({len(tracks)} total)", 
+            value="\n".join(track_list), 
+            inline=False
+        )
+        
+        if len(tracks) > 15:
+            embed.set_footer(text=f"And {len(tracks) - 15} more songs")
+        
+        await ctx.send(embed=embed)
+    
+    @playlist_.command(name='add')
+    async def playlist_add(self, ctx, name: str, *, search: str):
+        """Add a song to a playlist.
+        
+        Searches for a song and adds it to the specified playlist.
+        
+        Usage:
+        !playlist add <name> <search>
+        
+        Parameters:
+        - name: The name of the playlist to add to
+        - search: The song to add (YouTube URL or search terms)
+        
+        Examples:
+        !playlist add My Favorites never gonna give you up
+        """
+        # Find the playlist
+        playlists = await db.get_playlists(str(ctx.author.id))
+        playlist = None
+        playlist_id = None
+        
+        for p in playlists:
+            if p['name'].lower() == name.lower():
+                playlist = p
+                playlist_id = p['_id']
+                break
+        
+        if not playlist:
+            return await ctx.send(f"You don't have a playlist named **{name}**")
+        
+        # Search for the song
+        async with ctx.channel.typing():
+            try:
+                source = await YTDLSource.create_source(search, loop=self.bot.loop, requester=ctx.author)
+                
+                # Add to playlist
+                track_data = {
+                    'url': source['url'],
+                    'title': source['title'],
+                    'duration': source.get('duration'),
+                    'thumbnail': source.get('thumbnail'),
+                    'uploader': source.get('uploader', 'Unknown'),
+                    'added_at': datetime.datetime.utcnow().isoformat()
+                }
+                
+                await db.add_track_to_playlist(playlist_id, track_data)
+                
+                await ctx.send(f"Added **{source['title']}** to playlist **{name}**")
+                
+            except Exception as e:
+                logger.error(f"Error adding to playlist: {str(e)}", exc_info=True)
+                await ctx.send(f'An error occurred while processing this request: {str(e)}')
+    
+    @playlist_.command(name='remove')
+    async def playlist_remove(self, ctx, name: str, index: int):
+        """Remove a song from a playlist.
+        
+        Removes the song at the specified index from the playlist.
+        
+        Usage:
+        !playlist remove <name> <index>
+        
+        Parameters:
+        - name: The name of the playlist to remove from
+        - index: The index of the song to remove (starting from 1)
+        
+        Examples:
+        !playlist remove My Favorites 3
+        """
+        # Find the playlist
+        playlists = await db.get_playlists(str(ctx.author.id))
+        playlist = None
+        playlist_id = None
+        
+        for p in playlists:
+            if p['name'].lower() == name.lower():
+                playlist = p
+                playlist_id = p['_id']
+                break
+        
+        if not playlist:
+            return await ctx.send(f"You don't have a playlist named **{name}**")
+        
+        # Adjust index (user input is 1-based, database is 0-based)
+        db_index = index - 1
+        
+        # Check if index is valid
+        if db_index < 0 or db_index >= len(playlist.get('tracks', [])):
+            return await ctx.send(f"Invalid track index. The playlist has {len(playlist.get('tracks', []))} tracks.")
+        
+        # Get track title before removing
+        track_title = playlist['tracks'][db_index]['title']
+        
+        # Remove from playlist
+        result = await db.remove_track_from_playlist(playlist_id, db_index)
+        
+        if result:
+            await ctx.send(f"Removed **{track_title}** from playlist **{name}**")
+        else:
+            await ctx.send(f"Failed to remove track from playlist. Please try again.")
+    
+    @playlist_.command(name='play')
+    async def playlist_play(self, ctx, *, name: str):
+        """Play a playlist.
+        
+        Adds all songs from the specified playlist to the queue.
+        
+        Usage:
+        !playlist play <name>
+        
+        Parameters:
+        - name: The name of the playlist to play
+        
+        Examples:
+        !playlist play My Favorites
+        """
+        # Find the playlist
+        playlists = await db.get_playlists(str(ctx.author.id))
+        playlist = None
+        
+        for p in playlists:
+            if p['name'].lower() == name.lower():
+                playlist = p
+                break
+        
+        if not playlist:
+            return await ctx.send(f"You don't have a playlist named **{name}**")
+        
+        tracks = playlist.get('tracks', [])
+        
+        if not tracks:
+            return await ctx.send(f"Your playlist **{name}** is empty. Add songs with `!playlist add {name} <song>`")
+        
+        # Connect to voice if not already connected
+        vc = ctx.voice_client
+        if not vc:
+            await ctx.invoke(self.connect_)
+            vc = ctx.voice_client
+            if not vc:
+                return await ctx.send("Failed to connect to voice channel. Please try again.")
+        
+        # Get player
+        player = self.get_player(ctx)
+        
+        # Add tracks to queue
+        added_count = 0
+        async with ctx.channel.typing():
+            for track in tracks:
+                try:
+                    # Create source object compatible with our player
+                    source = {
+                        'url': track['url'],
+                        'title': track['title'],
+                        'duration': track.get('duration'),
+                        'thumbnail': track.get('thumbnail'),
+                        'requester': ctx.author,
+                        'uploader': track.get('uploader', 'Unknown')
+                    }
+                    
+                    # Add to memory queue
+                    await player.queue.put(source)
+                    # Save to Redis queue
+                    await player._save_to_queue(source)
+                    added_count += 1
+                    
+                except Exception as e:
+                    logger.error(f"Error adding track from playlist: {str(e)}", exc_info=True)
+                    continue
+        
+        await ctx.send(f"Added **{added_count}** tracks from playlist **{name}** to the queue")
+    
+    @playlist_.command(name='delete')
+    async def playlist_delete(self, ctx, *, name: str):
+        """Delete a playlist.
+        
+        Permanently deletes the specified playlist.
+        
+        Usage:
+        !playlist delete <name>
+        
+        Parameters:
+        - name: The name of the playlist to delete
+        
+        Examples:
+        !playlist delete My Favorites
+        """
+        # Find the playlist
+        playlists = await db.get_playlists(str(ctx.author.id))
+        playlist = None
+        playlist_id = None
+        
+        for p in playlists:
+            if p['name'].lower() == name.lower():
+                playlist = p
+                playlist_id = p['_id']
+                break
+        
+        if not playlist:
+            return await ctx.send(f"You don't have a playlist named **{name}**")
+        
+        # Delete the playlist
+        await db.delete_playlist(playlist_id)
+        
+        await ctx.send(f"Deleted playlist **{name}**")
