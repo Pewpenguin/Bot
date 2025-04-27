@@ -17,6 +17,11 @@ def setup_logging():
     music_file_handler = RotatingFileHandler(music_log_file, maxBytes=5*1024*1024, backupCount=5)
     music_file_handler.setFormatter(formatter)
     music_file_handler.setLevel(logging.DEBUG)
+    
+    stats_log_file = os.path.join(log_dir, 'statistics.log')
+    stats_file_handler = RotatingFileHandler(stats_log_file, maxBytes=5*1024*1024, backupCount=5)
+    stats_file_handler.setFormatter(formatter)
+    stats_file_handler.setLevel(logging.DEBUG)
 
     console_handler = logging.StreamHandler()
     console_handler.setFormatter(formatter)
@@ -30,5 +35,9 @@ def setup_logging():
     music_logger = logging.getLogger('music')
     music_logger.setLevel(logging.DEBUG)
     music_logger.addHandler(music_file_handler)
+    
+    stats_logger = logging.getLogger('bot.statistics')
+    stats_logger.setLevel(logging.DEBUG)
+    stats_logger.addHandler(stats_file_handler)
     
     return root_logger, music_logger

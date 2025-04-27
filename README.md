@@ -1,8 +1,15 @@
-# Discord Bot with Music Player
+# Discord Bot with Music Player and Statistics
 
 This Discord bot includes role management, moderation, polls, and a YouTube music player.
 
 ## Features
+
+### Server Statistics
+- Track member count changes over time
+- Monitor message activity by channel, hour, and day
+- Track command usage frequency
+- Monitor voice channel activity
+- View statistics with interactive commands
 
 ### Music Player
 - Play music from YouTube
@@ -28,6 +35,7 @@ This Discord bot includes role management, moderation, polls, and a YouTube musi
 - Python 3.8 or higher
 - FFmpeg installed on your system
 - Discord Bot Token
+- MongoDB and Redis databases
 
 ### Installation
 
@@ -98,6 +106,15 @@ python main.py
 - `!volume [1-100]` - Change the volume
 - `!stop` - Stop playing and clear the queue
 - `!leave` - Disconnect from the voice channel
+
+## Statistics Commands
+
+- `!stats` - Shows a general overview of server statistics
+- `!stats messages` - Displays detailed message statistics
+- `!stats commands` - Shows command usage statistics
+- `!stats members` - Displays member count statistics
+- `!stats voice` - Shows voice channel usage statistics
+- `!stats reset` - Resets all statistics (Admin only)
 
 ## Note
 

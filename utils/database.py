@@ -302,6 +302,42 @@ class Database:
                 "$set": {"updated_at": datetime.datetime.utcnow()}
             }
         )
+    
+    # Statistics-related methods
+    async def get_guild_stats(self, guild_id: str) -> Optional[Dict]:
+        """Get statistics for a guild"""
+        return await self.find_one("guild_stats", {"guild_id": guild_id})
+    
+    async def save_guild_stats(self, guild_id: str, stats: Dict):
+        """Save statistics for a guild"""
+        return await self.update_one(
+            "guild_stats",
+            {"guild_id": guild_id},
+            {"$set": stats},
+            upsert=True
+        )
+    
+    async def delete_guild_stats(self, guild_id: str):
+        """Delete statistics for a guild"""
+        return await self.delete_one("guild_stats", {"guild_id": guild_id})
+    
+    async def get_stats_summary(self, guild_id: str) -> Dict:
+        """Get a summary of statistics for a guild"""
+        stats = await self.get_guild_stats(guild_id)
+        if not stats:
+            return {
+                "member_count": 0,
+                "message_count": 0,
+                "command_count": 0,
+                "voice_minutes": 0
+            }
+        
+        return {
+            "member_count": stats.get("member_count", {}).get("current", 0),
+            "message_count": stats.get("messages", {}).get("total", 0),
+            "command_count": stats.get("commands", {}).get("total", 0),
+            "voice_minutes": stats.get("voice", {}).get("total_minutes", 0)
+        }
 
 # Create a singleton instance
 db = Database()
