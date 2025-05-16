@@ -29,6 +29,12 @@ This Discord bot includes role management, moderation, polls, and a YouTube musi
 ### Polls
 - Create polls with reactions
 
+### Auto-Moderation
+- Automatic detection and action for spam, excessive mentions, and banned words/phrases
+- Basic raid protection (detects rapid joins)
+- Configurable thresholds and actions (warn, delete, mute, kick, ban) for each rule
+- Option to set a dedicated log channel for auto-moderation actions
+
 ## Setup
 
 ### Prerequisites
@@ -115,6 +121,20 @@ python main.py
 - `!stats members` - Displays member count statistics
 - `!stats voice` - Shows voice channel usage statistics
 - `!stats reset` - Resets all statistics (Admin only)
+
+## Auto-Moderation Commands
+
+These commands require Administrator permissions.
+
+- `!automod` - Shows help for AutoMod commands.
+- `!automod toggle <true/false>` - Enable or disable AutoMod for the server.
+- `!automod config` - View the current AutoMod configuration.
+- `!automod logchannel [#channel]` - Set the channel for AutoMod logs. Provide no channel to disable.
+- `!automod addbannedword [word/phrase]` - Add a word/phrase to the banned list.
+- `!automod removebannedword [word/phrase]` - Remove a word/phrase from the banned list.
+- `!automod setspam <count> <seconds> <action>` - Configure spam detection (e.g., `!automod setspam 5 10 warn`). Actions: `warn`, `delete`, `mute`.
+- `!automod setmention <count> <seconds> <action>` - Configure excessive mention detection. Actions: `warn`, `delete`, `mute`.
+- `!automod setraid <joins> <seconds> <action>` - Configure raid protection. Actions: `kick`, `ban`, `warn`.
 
 ## Note
 

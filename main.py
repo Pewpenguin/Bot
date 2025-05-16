@@ -17,6 +17,7 @@ from cogs.polls import Polls
 from cogs.music import Music
 from cogs.help import Help
 from cogs.statistics import Statistics
+from cogs.automod import AutoMod
 
 intents = discord.Intents.all()
 client = commands.Bot(command_prefix='!', intents=intents)
@@ -86,6 +87,7 @@ async def setup():
     await client.add_cog(Music(client))
     await client.add_cog(Help(client))
     await client.add_cog(Statistics(client))
+    await client.add_cog(AutoMod(client))
 async def run_bot():
     await client.start(BOT_TOKEN)
     
