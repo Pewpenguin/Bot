@@ -1,10 +1,11 @@
+import datetime
+import json
+import logging
+from typing import Dict, List, Optional
+from datetime import datetime, UTC
+
 import motor.motor_asyncio
 import redis.asyncio as redis
-import os
-import logging
-import json
-import datetime
-from typing import Dict, List, Tuple, Any, Optional, Union
 
 logger = logging.getLogger('bot.database')
 
@@ -251,12 +252,13 @@ class Database:
     
     async def create_playlist(self, user_id: str, name: str, tracks: List[Dict] = None) -> Dict:
         """Create a new playlist"""
+        now = datetime.now(UTC)
         playlist = {
             "user_id": user_id,
             "name": name,
             "tracks": tracks or [],
-            "created_at": datetime.datetime.utcnow(),
-            "updated_at": datetime.datetime.utcnow()
+            "created_at": now,
+            "updated_at": now
         }
         result = await self.insert_one("music_playlists", playlist)
         playlist["_id"] = result.inserted_id
@@ -264,7 +266,8 @@ class Database:
     
     async def update_playlist(self, playlist_id: str, update_data: Dict):
         """Update a playlist"""
-        update_data["updated_at"] = datetime.datetime.utcnow()
+        now = datetime.now(UTC)
+        update_data["updated_at"] = now
         return await self.update_one(
             "music_playlists", 
             {"_id": playlist_id}, 
@@ -277,18 +280,20 @@ class Database:
     
     async def add_track_to_playlist(self, playlist_id: str, track_data: Dict):
         """Add a track to a playlist"""
+        now = datetime.now(UTC)
         return await self.update_one(
             "music_playlists",
             {"_id": playlist_id},
             {
                 "$push": {"tracks": track_data},
-                "$set": {"updated_at": datetime.datetime.utcnow()}
+                "$set": {"updated_at": now}
             }
         )
     
     async def remove_track_from_playlist(self, playlist_id: str, track_index: int):
         """Remove a track from a playlist by index"""
         # First get the playlist to check if index is valid
+        now = datetime.now(UTC)
         playlist = await self.get_playlist(playlist_id)
         if not playlist or track_index >= len(playlist.get("tracks", [])):
             return False
@@ -299,7 +304,7 @@ class Database:
             {"_id": playlist_id},
             {
                 "$unset": {f"tracks.{track_index}": 1},
-                "$set": {"updated_at": datetime.datetime.utcnow()}
+                "$set": {"updated_at": now}
             }
         )
     
