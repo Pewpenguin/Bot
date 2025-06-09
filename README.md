@@ -2,6 +2,114 @@
 
 This Discord bot includes role management, moderation, polls, and a YouTube music player.
 
+## Architecture Flowchart
+
+```mermaid
+flowchart TD
+    %% External Services
+    subgraph "External Services"
+        direction TB
+        DiscordGateway["Discord Gateway"]:::external
+        YouTube((YouTube API)):::external
+        MongoDB[(MongoDB)]:::data
+        Redis[(Redis)]:::data
+        FFmpeg{FFmpeg Binary}:::external
+    end
+
+    %% Bot Application
+    subgraph "Discord Bot Application"
+        direction TB
+        Main["main.py\n(Entry Point & Plugin Loader)"]:::core
+
+        subgraph "Plugins (Cogs)"
+            direction TB
+            Automod["Automod Cog"]:::cogs
+            Greetings["Greetings Cog"]:::cogs
+            HelpCog["Help Cog"]:::cogs
+            Moderation["Moderation Cog"]:::cogs
+            Music["Music Cog"]:::cogs
+            Polls["Polls Cog"]:::cogs
+            Role["Role Management Cog"]:::cogs
+            Statistics["Statistics Cog"]:::cogs
+        end
+
+        subgraph "Utilities & Config"
+            direction TB
+            Database["Database Utility"]:::utils
+            FFCheck["FFmpeg Checker"]:::utils
+            ConfigInit["config/__init__.py"]:::utils
+            LoggingConfig["logging_config.py"]:::utils
+        end
+
+        Logs["logs/\n(Log Files)"]:::logs
+    end
+
+    %% Data Flows
+    DiscordGateway -->|"events"| Main
+    Main -->|"commands & responses"| DiscordGateway
+
+    Main -->|loads| Automod
+    Main -->|loads| Greetings
+    Main -->|loads| HelpCog
+    Main -->|loads| Moderation
+    Main -->|loads| Music
+    Main -->|loads| Polls
+    Main -->|loads| Role
+    Main -->|loads| Statistics
+
+    %% Cogs to Utilities & Data
+    Automod -->|queries rules| Database
+    Moderation -->|updates configs| Database
+    Role -->|role data| Database
+    Polls -->|vote counts| Redis
+    Statistics -->|stats read/write| MongoDB
+    Statistics -->|cache metrics| Redis
+    Music -->|stream URL| YouTube
+    Music -->|health check| FFCheck
+    Music -->|audio processing| FFmpeg
+    Music -->|"voice stream"| DiscordGateway
+
+    %% Utils to Data
+    Database --> MongoDB
+    Database --> Redis
+
+    %% Logging
+    Automod -->|logs| LoggingConfig
+    Greetings -->|logs| LoggingConfig
+    HelpCog -->|logs| LoggingConfig
+    Moderation -->|logs| LoggingConfig
+    Music -->|logs| LoggingConfig
+    Polls -->|logs| LoggingConfig
+    Role -->|logs| LoggingConfig
+    Statistics -->|logs| LoggingConfig
+    LoggingConfig --> Logs
+
+    %% Styles
+    classDef core fill:#f2f2f2,stroke:#000,stroke-width:1px;
+    classDef cogs fill:#d4edda,stroke:#000,stroke-width:1px;
+    classDef data fill:#cfe2ff,stroke:#000,stroke-width:1px;
+    classDef external fill:#ffe5b4,stroke:#000,stroke-width:1px;
+    classDef utils fill:#e2e3e5,stroke:#000,stroke-width:1px;
+    classDef logs fill:#fff3cd,stroke:#000,stroke-width:1px;
+
+    %% Click Events
+    click Main "https://github.com/pewpenguin/bot/blob/main/main.py"
+    click Automod "https://github.com/pewpenguin/bot/blob/main/cogs/automod.py"
+    click Greetings "https://github.com/pewpenguin/bot/blob/main/cogs/greetings.py"
+    click HelpCog "https://github.com/pewpenguin/bot/blob/main/cogs/help.py"
+    click Moderation "https://github.com/pewpenguin/bot/blob/main/cogs/moderation.py"
+    click Music "https://github.com/pewpenguin/bot/blob/main/cogs/music.py"
+    click Polls "https://github.com/pewpenguin/bot/blob/main/cogs/polls.py"
+    click Role "https://github.com/pewpenguin/bot/blob/main/cogs/role.py"
+    click Statistics "https://github.com/pewpenguin/bot/blob/main/cogs/statistics.py"
+    click Database "https://github.com/pewpenguin/bot/blob/main/utils/database.py"
+    click FFCheck "https://github.com/pewpenguin/bot/blob/main/utils/ffmpeg_check.py"
+    click LoggingConfig "https://github.com/pewpenguin/bot/blob/main/config/logging_config.py"
+    click ConfigInit "https://github.com/pewpenguin/bot/blob/main/config/__init__.py"
+    click Logs "https://github.com/pewpenguin/bot/tree/main/logs/"
+
+```
+
 ## Features
 
 ### Server Statistics
